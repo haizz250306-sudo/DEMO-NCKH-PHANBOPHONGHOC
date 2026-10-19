@@ -309,7 +309,7 @@ export function EquipmentExplorer() {
       ? items.map((item) => item.id === editingItem.id ? savedItem : item)
       : [savedItem, ...items]
     saveEquipment(nextItems)
-    setItems(nextItems)
+    setItems(loadEquipment())
     setIsFormOpen(false)
   }
 
@@ -317,7 +317,7 @@ export function EquipmentExplorer() {
     if (!window.confirm(`Xóa thiết bị “${item.name}” khỏi danh mục?`)) return
     const nextItems = items.filter((candidate) => candidate.id !== item.id)
     saveEquipment(nextItems)
-    setItems(nextItems)
+    setItems(loadEquipment())
   }
 
   function updateIncidentStatus(id: string, status: IncidentStatus) {
@@ -520,7 +520,7 @@ export function EquipmentExplorer() {
       return (
         <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4" aria-label={`Phòng tại ${floor ? floorLabel(floor) : "tầng"}`}>
           {floorRooms.map((entry) => {
-            const summary = summarize(items, new Set([entry.id]))
+            const summary = summarize(items, new Set([getRoomKey(entry)]))
             return (
               <article key={entry.id} className="rounded-xl border border-slate-200 bg-white p-4 transition hover:border-sky-300 hover:shadow-sm">
                 <div className="flex items-start justify-between gap-3"><div><h2 className="text-lg font-bold text-slate-900">{entry.name}</h2><p className="mt-1 text-sm text-slate-500">{entry.capacity} chỗ</p></div><span className="flex size-9 items-center justify-center rounded-lg bg-sky-50 text-sky-700"><DoorOpen className="size-4" /></span></div>
@@ -673,9 +673,9 @@ function EmptyState({ title, message, action }: { title: string; message: string
 function EquipmentRows({ items, onEdit, onRemove, onToggle }: { items: EquipmentItem[]; onEdit: (item: EquipmentItem) => void; onRemove: (item: EquipmentItem) => void; onToggle: (item: EquipmentItem) => void }) {
   return (
     <div>
-      <div className="hidden grid-cols-[minmax(150px,1.3fr)_minmax(120px,1fr)_minmax(150px,1fr)_80px_130px_140px] gap-3 bg-slate-50 px-5 py-3 text-xs font-bold uppercase text-slate-500 md:grid"><span>Thiết bị</span><span>Loại</span><span>Trạng thái</span><span>Số lượng</span><span>Điều khiển</span><span className="sr-only">Thao tác</span></div>
-      <ul className="divide-y divide-slate-100">{items.map((item) => <li key={item.id} className="grid gap-3 px-4 py-4 md:grid-cols-[minmax(150px,1.3fr)_minmax(120px,1fr)_minmax(150px,1fr)_80px_130px_140px] md:items-center md:px-5">
-        <div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><p className="font-semibold text-slate-800">{item.name}</p>{item.isDemo && <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-500">Demo</span>}</div>{item.notes && <p className="mt-1 truncate text-xs text-slate-500">{item.notes}</p>}</div>
+      <div className="hidden grid-cols-[minmax(170px,1.3fr)_minmax(120px,1fr)_minmax(150px,1fr)_80px_130px_140px] gap-3 bg-slate-50 px-5 py-3 text-xs font-bold uppercase text-slate-500 md:grid"><span>Thiết bị / mã</span><span>Loại</span><span>Trạng thái</span><span>Số lượng</span><span>Điều khiển</span><span className="sr-only">Thao tác</span></div>
+      <ul className="divide-y divide-slate-100">{items.map((item) => <li key={item.id} className="grid gap-3 px-4 py-4 md:grid-cols-[minmax(170px,1.3fr)_minmax(120px,1fr)_minmax(150px,1fr)_80px_130px_140px] md:items-center md:px-5">
+        <div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><p className="font-semibold text-slate-800">{item.name}</p>{item.isDemo && <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-500">Demo</span>}</div><p className="mt-1 text-xs font-medium text-sky-700">Mã: {item.assetCode ?? "Chưa cấp mã"}</p>{item.notes && <p className="mt-1 truncate text-xs text-slate-500">{item.notes}</p>}</div>
         <p className="text-sm text-slate-600"><span className="mr-2 text-xs text-slate-400 md:hidden">Loại</span>{item.category}</p>
         <StatusBadge status={item.status} />
         <p className="text-sm font-semibold tabular-nums text-slate-700"><span className="mr-2 text-xs font-normal text-slate-400 md:hidden">Số lượng</span>{item.quantity}</p>

@@ -9,6 +9,7 @@ export type EquipmentItem = {
   category: string
   roomId: string
   roomKey?: string
+  assetCode?: string
   quantity: number
   status: EquipmentStatus
   controllable: boolean
@@ -48,41 +49,77 @@ function matchesStandardEquipment(item: EquipmentItem, suffix: string): boolean 
   return normalized.includes("quat")
 }
 
+function equipmentCodeBase(item: EquipmentItem): string {
+  const room = SHEET_ROOMS.find((candidate) => getRoomKey(candidate) === item.roomKey)
+  const roomPart = room
+    ? `${room.campus ?? "CAMPUS"}-${room.building ?? "ROOM"}-${room.id}`
+    : item.roomId || "UNASSIGNED"
+  const namePart = normalizeEquipmentText(`${item.name}-${item.category}`)
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "")
+    .toUpperCase()
+  return `TB-${roomPart}-${namePart || "EQUIPMENT"}`
+}
+
+function makeUniqueAssetCode(item: EquipmentItem, index: number, usedCodes: Set<string>): string {
+  const base = equipmentCodeBase(item)
+  let code = `${base}-${String(index + 1).padStart(2, "0")}`
+  let suffix = 2
+  while (usedCodes.has(code)) {
+    code = `${base}-${String(index + 1).padStart(2, "0")}-${suffix}`
+    suffix += 1
+  }
+  usedCodes.add(code)
+  return code
+}
+
+function splitIntoIndividualEquipment(items: EquipmentItem[]): EquipmentItem[] {
+  const usedCodes = new Set<string>()
+  return items.flatMap((item) => {
+    const count = Math.max(1, item.quantity)
+    return Array.from({ length: count }, (_, index) => {
+      const assetCode = item.assetCode && count === 1 && !usedCodes.has(item.assetCode)
+        ? item.assetCode
+        : makeUniqueAssetCode(item, index, usedCodes)
+      usedCodes.add(assetCode)
+      return {
+        ...item,
+        id: index === 0 ? item.id : `${item.id}-${index + 1}`,
+        quantity: 1,
+        assetCode,
+      }
+    })
+  })
+}
+
 function withRoomEquipmentDefaults(items: EquipmentItem[]): EquipmentItem[] {
   const next = [...items]
 
   for (const room of SHEET_ROOMS) {
     for (const standard of ROOM_EQUIPMENT) {
-      const existing = next.find(
+      const existingItems = next.filter(
         (item) =>
           item.roomId === room.id &&
           (item.roomKey ?? "") === getRoomKey(room) &&
           matchesStandardEquipment(item, standard.suffix),
       )
-      if (existing) {
-        if (!existing.isStandard) {
-          next[next.indexOf(existing)] = {
-            ...existing,
-            quantity: standard.quantity,
-            isStandard: true,
-          }
+      for (let index = existingItems.length; index < standard.quantity; index += 1) {
+        const standardItem: EquipmentItem = {
+          id: `standard-${getRoomKey(room)}-${standard.suffix}-${index + 1}`,
+          name: standard.name,
+          category: standard.category,
+          roomId: room.id,
+          roomKey: getRoomKey(room),
+          quantity: 1,
+          status: "active",
+          controllable: false,
+          notes: "Thiết bị tiêu chuẩn của phòng",
+          updatedAt: "",
+          isStandard: true,
         }
-        continue
+        standardItem.assetCode = makeUniqueAssetCode(standardItem, index, new Set(next.map((item) => item.assetCode).filter(Boolean) as string[]))
+        next.push(standardItem)
       }
-
-      next.push({
-        id: `standard-${room.id}-${standard.suffix}`,
-        name: standard.name,
-        category: standard.category,
-        roomId: room.id,
-        roomKey: getRoomKey(room),
-        quantity: standard.quantity,
-        status: "active",
-        controllable: false,
-        notes: "Thiết bị tiêu chuẩn của phòng",
-        updatedAt: "",
-        isStandard: true,
-      })
     }
   }
   return next
@@ -122,6 +159,7 @@ export function loadEquipment(): EquipmentItem[] {
         roomKey: typeof legacy.roomKey === "string"
           ? legacy.roomKey
           : "",
+        assetCode: typeof legacy.assetCode === "string" ? legacy.assetCode : undefined,
         quantity: Number.isInteger(legacy.quantity) && Number(legacy.quantity) > 0 ? Number(legacy.quantity) : 1,
         status: legacy.isDemo && legacy.id === "demo-a301-projector" && !legacy.updatedAt ? "active" : status,
         controllable: Boolean(legacy.controllable),
@@ -136,13 +174,8 @@ export function loadEquipment(): EquipmentItem[] {
       const room = SHEET_ROOMS.find((candidate) => candidate.id === item.roomId)
       return room ? { ...item, roomKey: getRoomKey(room) } : item
     })
-    const itemsWithDefaults = withRoomEquipmentDefaults(itemsWithRoomKeys)
-    if (itemsWithDefaults.length !== normalizedItems.length ||
-      itemsWithDefaults.some((item, index) =>
-        item.quantity !== normalizedItems[index]?.quantity ||
-        item.isStandard !== normalizedItems[index]?.isStandard ||
-        item.roomKey !== normalizedItems[index]?.roomKey
-      )) {
+    const itemsWithDefaults = withRoomEquipmentDefaults(splitIntoIndividualEquipment(itemsWithRoomKeys))
+    if (JSON.stringify(itemsWithDefaults) !== JSON.stringify(items)) {
       window.localStorage.setItem(EQUIPMENT_STORAGE_KEY, JSON.stringify(itemsWithDefaults))
     }
     return itemsWithDefaults
@@ -155,6 +188,7 @@ export function loadEquipment(): EquipmentItem[] {
 
 export function saveEquipment(items: EquipmentItem[]): void {
   if (typeof window === "undefined") return
-  window.localStorage.setItem(EQUIPMENT_STORAGE_KEY, JSON.stringify(items))
+  const normalizedItems = withRoomEquipmentDefaults(splitIntoIndividualEquipment(items))
+  window.localStorage.setItem(EQUIPMENT_STORAGE_KEY, JSON.stringify(normalizedItems))
   window.dispatchEvent(new Event(EQUIPMENT_UPDATED_EVENT))
 }
