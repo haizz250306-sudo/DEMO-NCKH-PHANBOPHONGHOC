@@ -13,6 +13,7 @@ export type EquipmentItem = {
   notes: string
   updatedAt: string
   isDemo?: boolean
+  isStandard?: boolean
 }
 
 export const EQUIPMENT_STORAGE_KEY = "apag-equipment-v1"
@@ -52,10 +53,11 @@ function withRoomEquipmentDefaults(items: EquipmentItem[]): EquipmentItem[] {
           matchesStandardEquipment(item, standard.suffix),
       )
       if (existing) {
-        if (existing.quantity !== standard.quantity) {
+        if (!existing.isStandard) {
           next[next.indexOf(existing)] = {
             ...existing,
             quantity: standard.quantity,
+            isStandard: true,
           }
         }
         continue
@@ -71,6 +73,7 @@ function withRoomEquipmentDefaults(items: EquipmentItem[]): EquipmentItem[] {
         controllable: false,
         notes: "Thiết bị tiêu chuẩn của phòng",
         updatedAt: "",
+        isStandard: true,
       })
     }
   }
@@ -114,11 +117,15 @@ export function loadEquipment(): EquipmentItem[] {
         notes: typeof legacy.notes === "string" ? legacy.notes : "",
         updatedAt: typeof legacy.updatedAt === "string" ? legacy.updatedAt : "",
         isDemo: Boolean(legacy.isDemo),
+        isStandard: Boolean(legacy.isStandard),
       }
     })
     const itemsWithDefaults = withRoomEquipmentDefaults(normalizedItems)
     if (itemsWithDefaults.length !== normalizedItems.length ||
-      itemsWithDefaults.some((item, index) => item.quantity !== normalizedItems[index]?.quantity)) {
+      itemsWithDefaults.some((item, index) =>
+        item.quantity !== normalizedItems[index]?.quantity ||
+        item.isStandard !== normalizedItems[index]?.isStandard
+      )) {
       window.localStorage.setItem(EQUIPMENT_STORAGE_KEY, JSON.stringify(itemsWithDefaults))
     }
     return itemsWithDefaults

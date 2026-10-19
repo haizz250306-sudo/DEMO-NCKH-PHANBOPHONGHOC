@@ -297,6 +297,7 @@ export function EquipmentExplorer() {
       notes: draft.notes.trim(),
       updatedAt: new Date().toISOString(),
       ...(editingItem?.isDemo ? { isDemo: true } : {}),
+      ...(editingItem?.isStandard ? { isStandard: true } : {}),
     }
     const nextItems = editingItem
       ? items.map((item) => item.id === editingItem.id ? savedItem : item)

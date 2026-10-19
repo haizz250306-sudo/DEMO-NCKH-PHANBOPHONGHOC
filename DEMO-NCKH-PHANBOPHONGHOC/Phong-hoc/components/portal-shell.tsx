@@ -426,17 +426,22 @@ export function PortalShell({
 
           <main className="min-w-0 flex-1">
             <header className="flex h-[82px] items-center justify-between border-b border-slate-200 bg-white/80 px-6 backdrop-blur-sm">
-              <button
-                type="button"
-                onClick={() => setAdminNavOpen((open) => !open)}
-                aria-label={adminNavOpen ? "Thu gọn menu" : "Mở menu"}
-                aria-expanded={adminNavOpen}
-                aria-controls="admin-navigation"
-                title={adminNavOpen ? "Thu gọn menu" : "Mở menu"}
-                className="flex size-10 items-center justify-center rounded-lg text-slate-600 transition hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1789d9]"
-              >
-                <Menu className="size-5" />
-              </button>
+              <div className="flex min-w-0 items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => setAdminNavOpen((open) => !open)}
+                  aria-label={adminNavOpen ? "Thu gọn menu" : "Mở menu"}
+                  aria-expanded={adminNavOpen}
+                  aria-controls="admin-navigation"
+                  title={adminNavOpen ? "Thu gọn menu" : "Mở menu"}
+                  className="flex size-10 shrink-0 items-center justify-center rounded-lg text-slate-600 transition hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1789d9]"
+                >
+                  <Menu className="size-5" />
+                </button>
+                <h1 className="truncate text-lg font-bold text-slate-900">
+                  {menuItems.find((item) => item.key === activePanel)?.label}
+                </h1>
+              </div>
               <div className="flex items-center gap-4">
                 <button
                   type="button"
