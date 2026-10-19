@@ -1,4 +1,5 @@
 import { SHEET_ROOMS } from "@/lib/schedule-data"
+import type { RoomInfo } from "@/lib/scheduling"
 
 export type EquipmentStatus = "active" | "off" | "maintenance" | "broken" | "offline"
 
@@ -7,6 +8,7 @@ export type EquipmentItem = {
   name: string
   category: string
   roomId: string
+  roomKey?: string
   quantity: number
   status: EquipmentStatus
   controllable: boolean
@@ -24,6 +26,10 @@ const ROOM_EQUIPMENT = [
   { suffix: "projector", name: "Máy chiếu", category: "Máy chiếu", quantity: 1 },
   { suffix: "ceiling-fan", name: "Quạt trần", category: "Quạt trần", quantity: 4 },
 ] as const
+
+export function getRoomKey(room: Pick<RoomInfo, "id" | "building" | "campus">): string {
+  return `${room.campus ?? ""}::${room.building ?? ""}::${room.id}`
+}
 
 function normalizeEquipmentText(value: string): string {
   return value
@@ -50,6 +56,7 @@ function withRoomEquipmentDefaults(items: EquipmentItem[]): EquipmentItem[] {
       const existing = next.find(
         (item) =>
           item.roomId === room.id &&
+          (item.roomKey ?? "") === getRoomKey(room) &&
           matchesStandardEquipment(item, standard.suffix),
       )
       if (existing) {
@@ -68,6 +75,7 @@ function withRoomEquipmentDefaults(items: EquipmentItem[]): EquipmentItem[] {
         name: standard.name,
         category: standard.category,
         roomId: room.id,
+        roomKey: getRoomKey(room),
         quantity: standard.quantity,
         status: "active",
         controllable: false,
@@ -111,6 +119,9 @@ export function loadEquipment(): EquipmentItem[] {
         name: typeof legacy.name === "string" ? legacy.name : "Thiết bị chưa đặt tên",
         category: typeof legacy.category === "string" ? legacy.category : "Khác",
         roomId: typeof legacy.roomId === "string" ? legacy.roomId : "",
+        roomKey: typeof legacy.roomKey === "string"
+          ? legacy.roomKey
+          : "",
         quantity: Number.isInteger(legacy.quantity) && Number(legacy.quantity) > 0 ? Number(legacy.quantity) : 1,
         status: legacy.isDemo && legacy.id === "demo-a301-projector" && !legacy.updatedAt ? "active" : status,
         controllable: Boolean(legacy.controllable),
@@ -120,11 +131,17 @@ export function loadEquipment(): EquipmentItem[] {
         isStandard: Boolean(legacy.isStandard),
       }
     })
-    const itemsWithDefaults = withRoomEquipmentDefaults(normalizedItems)
+    const itemsWithRoomKeys = normalizedItems.map((item) => {
+      if (item.roomKey && item.roomKey.includes("::")) return item
+      const room = SHEET_ROOMS.find((candidate) => candidate.id === item.roomId)
+      return room ? { ...item, roomKey: getRoomKey(room) } : item
+    })
+    const itemsWithDefaults = withRoomEquipmentDefaults(itemsWithRoomKeys)
     if (itemsWithDefaults.length !== normalizedItems.length ||
       itemsWithDefaults.some((item, index) =>
         item.quantity !== normalizedItems[index]?.quantity ||
-        item.isStandard !== normalizedItems[index]?.isStandard
+        item.isStandard !== normalizedItems[index]?.isStandard ||
+        item.roomKey !== normalizedItems[index]?.roomKey
       )) {
       window.localStorage.setItem(EQUIPMENT_STORAGE_KEY, JSON.stringify(itemsWithDefaults))
     }

@@ -26,6 +26,7 @@ import {
   EQUIPMENT_UPDATED_EVENT,
   loadEquipment,
   saveEquipment,
+  getRoomKey,
   type EquipmentItem,
   type EquipmentStatus,
 } from "@/lib/equipment-store"
@@ -33,7 +34,7 @@ import { SHEET_ROOMS } from "@/lib/schedule-data"
 import type { RoomInfo } from "@/lib/scheduling"
 
 type CampusName = NonNullable<RoomInfo["campus"]>
-type EquipmentDraft = Pick<EquipmentItem, "name" | "category" | "roomId" | "status" | "controllable" | "notes"> & { quantity: string }
+type EquipmentDraft = Pick<EquipmentItem, "name" | "category" | "roomId" | "roomKey" | "status" | "controllable" | "notes"> & { quantity: string }
 type MaintenanceDraft = {
   invoiceNumber: string
   vendor: string
@@ -47,7 +48,7 @@ type MaintenanceDraft = {
 type HierarchyLevel = "campus" | "building" | "floor" | "room"
 
 const CAMPUS_ORDER: CampusName[] = ["36 Xuân La", "371 Nguyễn Hoàng Tôn", "77 NCT"]
-const EMPTY_DRAFT: EquipmentDraft = { name: "", category: "", roomId: "", quantity: "1", status: "active", controllable: false, notes: "" }
+const EMPTY_DRAFT: EquipmentDraft = { name: "", category: "", roomId: "", roomKey: "", quantity: "1", status: "active", controllable: false, notes: "" }
 const STATUS_LABELS: Record<EquipmentStatus, string> = {
   active: "Đang hoạt động",
   off: "Đang tắt",
@@ -167,8 +168,8 @@ function buildingLabel(building: string): string {
   return `Tòa ${building}`
 }
 
-function summarize(items: EquipmentItem[], roomIds: Set<string>) {
-  const inRooms = items.filter((item) => roomIds.has(item.roomId))
+function summarize(items: EquipmentItem[], roomKeys: Set<string>) {
+  const inRooms = items.filter((item) => item.roomKey ? roomKeys.has(item.roomKey) : roomKeys.has(item.roomId))
   return {
     total: inRooms.reduce((sum, item) => sum + item.quantity, 0),
     active: inRooms.filter((item) => item.status === "active").reduce((sum, item) => sum + item.quantity, 0),
@@ -226,11 +227,11 @@ export function EquipmentExplorer() {
   }, [])
 
   const campuses = useMemo(() => orderedCampuses(), [])
-  const unassignedItems = items.filter((item) => !item.roomId || !SHEET_ROOMS.some((candidate) => candidate.id === item.roomId))
+  const unassignedItems = items.filter((item) => !item.roomId || !item.roomKey || !SHEET_ROOMS.some((candidate) => getRoomKey(candidate) === item.roomKey))
   const campusRooms = campus ? roomsForCampus(campus) : []
   const buildingRooms = campusRooms.filter((candidate) => (candidate.building ?? "Chưa phân tòa") === building)
   const floorRooms = buildingRooms.filter((candidate) => (roomFloor(candidate) ?? "unassigned") === floor)
-  const roomItems = room ? items.filter((item) => item.roomId === room.id) : []
+  const roomItems = room ? items.filter((item) => (item.roomKey ?? item.roomId) === getRoomKey(room)) : []
   const view = showUnassigned ? "unassigned" : room ? "room" : floor ? "floor" : building ? "building" : campus ? "campus" : "campuses"
 
   const breadcrumbs: { label: string; level: HierarchyLevel | "root" | "unassigned"; value?: string }[] = [
@@ -272,7 +273,11 @@ export function EquipmentExplorer() {
 
   function openCreateForm(roomId = room?.id ?? "") {
     setEditingItem(null)
-    setDraft({ ...EMPTY_DRAFT, roomId })
+    setDraft({
+      ...EMPTY_DRAFT,
+      roomId,
+      roomKey: room ? getRoomKey(room) : "",
+    })
     setIsFormOpen(true)
   }
 
@@ -293,6 +298,7 @@ export function EquipmentExplorer() {
       name: draft.name.trim(),
       category: draft.category.trim(),
       roomId: draft.roomId,
+      roomKey: draft.roomKey,
       quantity,
       notes: draft.notes.trim(),
       updatedAt: new Date().toISOString(),
@@ -437,7 +443,7 @@ export function EquipmentExplorer() {
           {campuses.map((entry, index) => {
             const siteRooms = roomsForCampus(entry)
             const siteBuildings = new Set(siteRooms.map((candidate) => candidate.building ?? "Chưa phân tòa"))
-            const summary = summarize(items, new Set(siteRooms.map((candidate) => candidate.id)))
+            const summary = summarize(items, new Set(siteRooms.map(getRoomKey)))
             return (
               <button key={entry} type="button" onClick={() => { setCampus(entry); setShowUnassigned(false) }} className="group relative min-h-60 overflow-hidden rounded-xl border border-slate-200 bg-white p-5 text-left shadow-sm transition duration-200 hover:-translate-y-1 hover:border-sky-300 hover:shadow-md">
                 <div className="absolute inset-x-0 top-0 h-1 bg-sky-600" />
@@ -467,7 +473,7 @@ export function EquipmentExplorer() {
           {buildings.map((entry, index) => {
             const rooms = roomsForBuilding(campusRooms, entry)
             const floors = new Set(rooms.map((candidate) => roomFloor(candidate)).filter((value): value is string => value !== null))
-            const summary = summarize(items, new Set(rooms.map((candidate) => candidate.id)))
+            const summary = summarize(items, new Set(rooms.map(getRoomKey)))
             return (
               <button key={entry} type="button" onClick={() => setBuilding(entry)} className="group min-h-52 rounded-xl border border-slate-200 bg-white p-5 text-left transition hover:-translate-y-0.5 hover:border-sky-300 hover:shadow-md">
                 <div className="flex items-start justify-between"><span className="flex size-11 items-center justify-center rounded-lg bg-sky-50 text-sky-700"><Building2 className="size-5" /></span><span className="text-xs font-medium text-slate-400">TÒA {String(index + 1).padStart(2, "0")}</span></div>
@@ -494,7 +500,7 @@ export function EquipmentExplorer() {
         <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3" aria-label={`Các tầng của ${building ? buildingLabel(building) : "tòa nhà"}`}>
           {floors.map((entry, index) => {
             const rooms = buildingRooms.filter((candidate) => (roomFloor(candidate) ?? "unassigned") === entry)
-            const summary = summarize(items, new Set(rooms.map((candidate) => candidate.id)))
+            const summary = summarize(items, new Set(rooms.map(getRoomKey)))
             return (
               <button key={entry} type="button" onClick={() => setFloor(entry)} className="group relative overflow-hidden rounded-xl border border-slate-200 bg-white p-5 text-left transition hover:border-sky-300 hover:shadow-md">
                 <div className="absolute inset-y-0 left-0 w-1 bg-sky-600/70" />
@@ -694,7 +700,14 @@ function EquipmentForm({ draft, onChange, onSubmit, onClose, editing }: { draft:
           <div className="grid gap-4 sm:grid-cols-2">
             <label className="text-sm font-medium text-slate-700">Tên thiết bị *<input required autoFocus value={draft.name} onChange={(event) => onChange({ ...draft, name: event.target.value })} className={FIELD_CLASS} placeholder="Ví dụ: Máy chiếu" /></label>
             <label className="text-sm font-medium text-slate-700">Loại thiết bị *<input required value={draft.category} onChange={(event) => onChange({ ...draft, category: event.target.value })} className={FIELD_CLASS} placeholder="Ví dụ: Chiếu sáng" /></label>
-            <label className="text-sm font-medium text-slate-700">Phòng<select value={draft.roomId} onChange={(event) => onChange({ ...draft, roomId: event.target.value })} className={FIELD_CLASS}><option value="">Chưa gán phòng</option>{SHEET_ROOMS.map((entry) => <option key={entry.id} value={entry.id}>{entry.name} · {entry.campus}</option>)}</select></label>
+            <label className="text-sm font-medium text-slate-700">Phòng<select value={draft.roomKey} onChange={(event) => {
+              const selectedRoom = SHEET_ROOMS.find((entry) => getRoomKey(entry) === event.target.value)
+              onChange({
+                ...draft,
+                roomId: selectedRoom?.id ?? "",
+                roomKey: selectedRoom ? getRoomKey(selectedRoom) : "",
+              })
+            }} className={FIELD_CLASS}><option value="">Chưa gán phòng</option>{SHEET_ROOMS.map((entry) => <option key={getRoomKey(entry)} value={getRoomKey(entry)}>{entry.name} · {entry.building} · {entry.campus}</option>)}</select></label>
             <label className="text-sm font-medium text-slate-700">Số lượng<input required type="number" min="1" step="1" value={draft.quantity} onChange={(event) => onChange({ ...draft, quantity: event.target.value })} className={FIELD_CLASS} /></label>
             <label className="text-sm font-medium text-slate-700 sm:col-span-2">Trạng thái<select value={draft.status} onChange={(event) => onChange({ ...draft, status: event.target.value as EquipmentStatus })} className={FIELD_CLASS}><option value="active">Đang hoạt động</option><option value="off">Đang tắt</option><option value="maintenance">Cần bảo trì</option><option value="broken">Đang hỏng</option><option value="offline">Mất kết nối</option></select></label>
           </div>
