@@ -16,6 +16,7 @@ export type EquipmentIncident = {
   id: string
   roomId: string
   equipmentId: string
+  equipmentCode?: string
   equipmentName: string
   issueType: string
   severity: IncidentSeverity

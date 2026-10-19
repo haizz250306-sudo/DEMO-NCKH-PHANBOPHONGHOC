@@ -52,13 +52,20 @@ function matchesStandardEquipment(item: EquipmentItem, suffix: string): boolean 
 function equipmentCodeBase(item: EquipmentItem): string {
   const room = SHEET_ROOMS.find((candidate) => getRoomKey(candidate) === item.roomKey)
   const roomPart = room
-    ? `${room.campus ?? "CAMPUS"}-${room.building ?? "ROOM"}-${room.id}`
+    ? `${room.building?.replace(/^36XL-/, "") ?? "ROOM"}-${room.id}`
     : item.roomId || "UNASSIGNED"
   const namePart = normalizeEquipmentText(`${item.name}-${item.category}`)
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "")
     .toUpperCase()
-  return `TB-${roomPart}-${namePart || "EQUIPMENT"}`
+  const type = namePart.includes("DIEU-HOA") || namePart.includes("MAY-LANH")
+    ? "DH"
+    : namePart.includes("MAY-CHIEU")
+      ? "MC"
+      : namePart.includes("QUAT")
+        ? "QT"
+        : "TB"
+  return `TB-${roomPart}-${type}`
 }
 
 function makeUniqueAssetCode(item: EquipmentItem, index: number, usedCodes: Set<string>): string {
@@ -159,7 +166,9 @@ export function loadEquipment(): EquipmentItem[] {
         roomKey: typeof legacy.roomKey === "string"
           ? legacy.roomKey
           : "",
-        assetCode: typeof legacy.assetCode === "string" ? legacy.assetCode : undefined,
+        assetCode: typeof legacy.assetCode === "string" && /^TB-[A-Z0-9]+-[A-Z0-9]+-[A-Z]{2}-\d{2}$/.test(legacy.assetCode)
+          ? legacy.assetCode
+          : undefined,
         quantity: Number.isInteger(legacy.quantity) && Number(legacy.quantity) > 0 ? Number(legacy.quantity) : 1,
         status: legacy.isDemo && legacy.id === "demo-a301-projector" && !legacy.updatedAt ? "active" : status,
         controllable: Boolean(legacy.controllable),
