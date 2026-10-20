@@ -292,7 +292,7 @@ export function PortalShell({
             </div>
             <div className="flex h-[92px] w-[175px] shrink-0 items-center justify-center rounded-[18px] bg-white/70 px-4 shadow-inner shadow-white/60">
               <img
-                src="/apag-logo.svg"
+                src="/apag-logo.png"
                 alt="APAG"
                 className="h-auto w-full max-w-[150px] object-contain"
               />
