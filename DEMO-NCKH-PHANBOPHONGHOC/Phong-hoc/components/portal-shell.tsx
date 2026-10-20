@@ -290,15 +290,12 @@ export function PortalShell({
                 {currentTime}
               </div>
             </div>
-            <div className="relative h-[92px] w-[190px] overflow-hidden rounded-[18px] bg-gradient-to-br from-[#ebf6ff] via-[#dff2ff] to-[#d9f4ea]">
-              <div className="absolute inset-x-0 bottom-0 h-10 bg-[#d9f0db]" />
-              <div className="absolute inset-x-6 bottom-5 h-12 rounded-t-[18px] bg-[#d8f0ff] shadow-inner shadow-white/30" />
-              <div className="absolute left-8 top-5 h-6 w-10 rounded-[8px] bg-[#cfe7ff]" />
-              <div className="absolute right-10 top-5 h-8 w-12 rounded-[8px] bg-[#d3edff]" />
-              <div className="absolute inset-x-0 bottom-0 h-8 bg-[#b8e6b8] opacity-80" />
-              <div className="absolute right-3 top-3 rounded-full bg-[#dff5ff] px-2 py-1 text-[10px] font-bold tracking-wide text-sky-700">
-                APAG
-              </div>
+            <div className="flex h-[92px] w-[190px] items-center justify-center rounded-[18px] bg-white/70 px-3 shadow-inner shadow-white/60">
+              <img
+                src="/apag-logo.svg"
+                alt="APAG"
+                className="h-auto w-full max-w-[160px] object-contain"
+              />
             </div>
           </div>
         </div>
