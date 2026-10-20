@@ -112,7 +112,6 @@ export function RoomManagementPanel() {
         classInfo.className,
         classInfo.courseCode,
         classInfo.section,
-        classInfo.major,
       ].some((value) => value?.toLocaleLowerCase().includes(normalizedClassSearch));
     };
     const assignments = (snapshot?.result.assignments ?? []).filter(
