@@ -15,21 +15,9 @@ export const metadata: Metadata = {
     'Hệ thống tra cứu và phân bổ phòng học thông minh — theo dõi trạng thái phòng trống, lớp chính khóa và mượn phòng tạm thời theo thời gian thực.',
   generator: 'v0.app',
   icons: {
-    icon: [
-      {
-        url: '/icon-light-32x32.png',
-        media: '(prefers-color-scheme: light)',
-      },
-      {
-        url: '/icon-dark-32x32.png',
-        media: '(prefers-color-scheme: dark)',
-      },
-      {
-        url: '/icon.svg',
-        type: 'image/svg+xml',
-      },
-    ],
-    apple: '/apple-icon.png',
+    icon: '/site-icon.jpg',
+    shortcut: '/site-icon.jpg',
+    apple: '/site-icon.jpg',
   },
   other: {
     google: 'notranslate',
