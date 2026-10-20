@@ -87,7 +87,6 @@ export function PortalShell({
     if (isAdmin && window.location.pathname !== ADMIN_PANEL_PATHS[panel]) {
       window.history.pushState({ panel }, "", ADMIN_PANEL_PATHS[panel]);
     }
-    setAdminNavOpen(false);
   }
 
   useEffect(() => {
