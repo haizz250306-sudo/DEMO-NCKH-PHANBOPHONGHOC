@@ -281,8 +281,8 @@ export function PortalShell({
             </p>
           </div>
 
-          <div className="flex min-w-[320px] items-center justify-between rounded-[22px] border border-sky-100 bg-[#eaf5ff] p-4 shadow-inner shadow-white/20">
-            <div>
+          <div className="flex min-w-[340px] items-center gap-8 rounded-[22px] border border-sky-100 bg-[#eaf5ff] p-4 shadow-inner shadow-white/20">
+            <div className="min-w-0 shrink-0">
               <div className="text-[13px] font-medium capitalize text-slate-500">
                 {currentDate}
               </div>
@@ -290,11 +290,11 @@ export function PortalShell({
                 {currentTime}
               </div>
             </div>
-            <div className="flex h-[92px] w-[190px] items-center justify-center rounded-[18px] bg-white/70 px-3 shadow-inner shadow-white/60">
+            <div className="flex h-[92px] w-[175px] shrink-0 items-center justify-center rounded-[18px] bg-white/70 px-4 shadow-inner shadow-white/60">
               <img
                 src="/apag-logo.svg"
                 alt="APAG"
-                className="h-auto w-full max-w-[160px] object-contain"
+                className="h-auto w-full max-w-[150px] object-contain"
               />
             </div>
           </div>
