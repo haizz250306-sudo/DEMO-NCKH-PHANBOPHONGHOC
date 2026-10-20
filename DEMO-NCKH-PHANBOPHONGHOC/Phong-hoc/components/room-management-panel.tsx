@@ -7,6 +7,7 @@ import {
   CheckCircle2,
   Clock3,
   DoorOpen,
+  Search,
   Users,
 } from "lucide-react";
 import {
@@ -32,6 +33,7 @@ import {
   releaseRoomAssignments,
 } from "@/lib/scheduling";
 import { SHEET_ROOMS } from "@/lib/schedule-data";
+import { getCourseMeetingTimelines } from "@/lib/course-timing";
 
 type RoomCampus = NonNullable<RoomInfo["campus"]>;
 type CampusSelection = "all" | RoomCampus;
@@ -62,6 +64,9 @@ export function RoomManagementPanel() {
   const [selectedCampus, setSelectedCampus] =
     useState<CampusSelection>("all");
   const [selectedBuilding, setSelectedBuilding] = useState("all");
+  const [classSearch, setClassSearch] = useState("");
+  const [roomSearch, setRoomSearch] = useState("");
+  const [now, setNow] = useState(() => new Date());
 
   useEffect(() => {
     const refreshAllocation = () => {
@@ -84,10 +89,32 @@ export function RoomManagementPanel() {
     };
   }, []);
 
+  useEffect(() => {
+    const intervalId = window.setInterval(() => setNow(new Date()), 60_000);
+    return () => window.clearInterval(intervalId);
+  }, []);
+
   const roomRows = useMemo(() => {
     const classById = new Map(
       snapshot?.classes.map((classInfo) => [classInfo.id, classInfo]) ?? [],
     );
+    const courseTimelines = getCourseMeetingTimelines(snapshot?.classes ?? []);
+    const normalizedClassSearch = classSearch.trim().toLocaleLowerCase();
+    const normalizedRoomSearch = roomSearch.trim().toLocaleLowerCase();
+    const isClassExpired = (classInfo: NonNullable<typeof snapshot>["classes"][number]) => {
+      const courseEndAt = courseTimelines.get(classInfo.id)?.courseEndAt;
+      return Boolean(courseEndAt && new Date(`${courseEndAt}:00`).getTime() < now.getTime());
+    };
+    const matchesClassSearch = (classInfo: NonNullable<typeof snapshot>["classes"][number]) => {
+      if (!normalizedClassSearch) return true;
+      return [
+        classInfo.name,
+        classInfo.className,
+        classInfo.courseCode,
+        classInfo.section,
+        classInfo.major,
+      ].some((value) => value?.toLocaleLowerCase().includes(normalizedClassSearch));
+    };
     const assignments = (snapshot?.result.assignments ?? []).filter(
       (assignment) =>
         assignment.day === selectedDay && assignment.shift === selectedShift,
@@ -106,7 +133,11 @@ export function RoomManagementPanel() {
         (selectedCampus === "all" || room.campus === selectedCampus) &&
         (selectedCampus !== "36 Xuân La" ||
           selectedBuilding === "all" ||
-          room.building === selectedBuilding),
+          room.building === selectedBuilding) &&
+        (!normalizedRoomSearch ||
+          [room.id, room.name, room.building, room.campus].some((value) =>
+            value?.toLocaleLowerCase().includes(normalizedRoomSearch),
+          )),
     )
       .map((room) => ({
         room,
@@ -115,7 +146,10 @@ export function RoomManagementPanel() {
           .map((assignment) => ({
             assignment,
             classInfo: classById.get(assignment.classId),
-          })),
+          }))
+          .filter(({ classInfo }) =>
+            Boolean(classInfo && !isClassExpired(classInfo) && matchesClassSearch(classInfo)),
+          ),
         borrowings: approvedBorrowings.filter(
           (request) => request.roomId === room.id,
         ),
@@ -130,6 +164,9 @@ export function RoomManagementPanel() {
     selectedDay,
     selectedShift,
     snapshot,
+    classSearch,
+    roomSearch,
+    now,
   ]);
 
   const towerOptions = useMemo(
@@ -258,6 +295,32 @@ export function RoomManagementPanel() {
               </select>
             </label>
           </div>
+        </div>
+        <div className="mt-4 grid gap-3 border-t border-emerald-200/70 pt-4 md:grid-cols-2">
+          <label className="text-xs font-semibold text-slate-600">
+            Tìm theo lớp / môn học
+            <span className="relative mt-1 block">
+              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
+              <input
+                value={classSearch}
+                onChange={(event) => setClassSearch(event.target.value)}
+                className="block w-full rounded-lg border border-slate-200 bg-white py-2 pl-9 pr-3 text-sm font-normal text-slate-800 outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
+                placeholder="Tên lớp, môn học, mã học phần..."
+              />
+            </span>
+          </label>
+          <label className="text-xs font-semibold text-slate-600">
+            Tìm theo phòng học
+            <span className="relative mt-1 block">
+              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
+              <input
+                value={roomSearch}
+                onChange={(event) => setRoomSearch(event.target.value)}
+                className="block w-full rounded-lg border border-slate-200 bg-white py-2 pl-9 pr-3 text-sm font-normal text-slate-800 outline-none focus:border-emerald-400 focus:ring-2 focus:ring-emerald-100"
+                placeholder="Mã hoặc tên phòng..."
+              />
+            </span>
+          </label>
         </div>
       </section>
 
