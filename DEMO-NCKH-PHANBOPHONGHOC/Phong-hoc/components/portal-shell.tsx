@@ -471,8 +471,6 @@ export function PortalShell({
                   <Menu className="size-5" />
                 </button>
                 <h1 className="flex min-w-0 items-center gap-2 truncate text-lg font-bold text-slate-900">
-                  <span className="shrink-0 text-slate-500">APAG</span>
-                  <span className="shrink-0 text-slate-300" aria-hidden="true">/</span>
                   <span className="truncate">{menuItems.find((item) => item.key === activePanel)?.label}</span>
                 </h1>
               </div>
