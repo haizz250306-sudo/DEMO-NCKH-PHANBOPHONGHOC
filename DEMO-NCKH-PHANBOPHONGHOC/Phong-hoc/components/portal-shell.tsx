@@ -45,6 +45,22 @@ type AdminPanel =
   | "stats"
   | "settings";
 
+const ADMIN_PANEL_PATHS: Record<AdminPanel, string> = {
+  home: "/admin",
+  scheduler: "/admin/scheduler",
+  rooms: "/admin/rooms",
+  equipment: "/admin/equipment",
+  borrow: "/admin/borrow",
+  stats: "/admin/stats",
+  settings: "/admin/settings",
+};
+
+function panelFromPath(pathname: string): AdminPanel {
+  const entry = (Object.entries(ADMIN_PANEL_PATHS) as [AdminPanel, string][])
+    .find(([, path]) => path === pathname);
+  return entry?.[0] ?? "home";
+}
+
 export function PortalShell({
   role,
   children,
@@ -54,7 +70,9 @@ export function PortalShell({
 }) {
   const isAdmin = role === "admin";
   const isLecturer = role === "lecturer";
-  const [activePanel, setActivePanel] = useState<AdminPanel>("home");
+  const [activePanel, setActivePanel] = useState<AdminPanel>(() =>
+    isAdmin && typeof window !== "undefined" ? panelFromPath(window.location.pathname) : "home",
+  );
   const [adminNavOpen, setAdminNavOpen] = useState(false);
   const [adminAccountOpen, setAdminAccountOpen] = useState(false);
   const adminAccountRef = useRef<HTMLDivElement>(null);
@@ -63,6 +81,21 @@ export function PortalShell({
   >("register");
   const [openIncidentCount, setOpenIncidentCount] = useState(0);
   const [now, setNow] = useState<Date | null>(null);
+
+  function selectAdminPanel(panel: AdminPanel) {
+    setActivePanel(panel);
+    if (isAdmin && window.location.pathname !== ADMIN_PANEL_PATHS[panel]) {
+      window.history.pushState({ panel }, "", ADMIN_PANEL_PATHS[panel]);
+    }
+    setAdminNavOpen(false);
+  }
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    const handlePopState = () => setActivePanel(panelFromPath(window.location.pathname));
+    window.addEventListener("popstate", handlePopState);
+    return () => window.removeEventListener("popstate", handlePopState);
+  }, [isAdmin]);
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -280,7 +313,7 @@ export function PortalShell({
               <button
                 key={key}
                 type="button"
-                onClick={() => setActivePanel(key)}
+                onClick={() => selectAdminPanel(key)}
                 className="group flex items-center justify-between rounded-[22px] border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"
               >
                 <div className="flex items-center gap-4">
@@ -409,7 +442,7 @@ export function PortalShell({
                 <button
                   key={key}
                   type="button"
-                  onClick={() => setActivePanel(key)}
+                  onClick={() => selectAdminPanel(key)}
                   className={[
                     "flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-[15px] font-medium transition-all",
                     activePanel === key
@@ -438,8 +471,10 @@ export function PortalShell({
                 >
                   <Menu className="size-5" />
                 </button>
-                <h1 className="truncate text-lg font-bold text-slate-900">
-                  {menuItems.find((item) => item.key === activePanel)?.label}
+                <h1 className="flex min-w-0 items-center gap-2 truncate text-lg font-bold text-slate-900">
+                  <span className="shrink-0 text-slate-500">APAG</span>
+                  <span className="shrink-0 text-slate-300" aria-hidden="true">/</span>
+                  <span className="truncate">{menuItems.find((item) => item.key === activePanel)?.label}</span>
                 </h1>
               </div>
               <div className="flex items-center gap-4">
