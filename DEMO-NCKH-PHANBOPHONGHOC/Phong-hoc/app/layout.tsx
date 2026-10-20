@@ -13,11 +13,35 @@ export const metadata: Metadata = {
   title: 'Hệ thống Tra cứu & Phân bổ Phòng học HVHC&QTC',
   description:
     'Hệ thống tra cứu và phân bổ phòng học thông minh — theo dõi trạng thái phòng trống, lớp chính khóa và mượn phòng tạm thời theo thời gian thực.',
+  metadataBase: new URL(
+    process.env.NEXT_PUBLIC_SITE_URL ?? 'https://phong-hoc-g5sz.vercel.app',
+  ),
   generator: 'v0.app',
   icons: {
     icon: '/site-icon.jpg',
     shortcut: '/site-icon.jpg',
     apple: '/site-icon.jpg',
+  },
+  openGraph: {
+    type: 'website',
+    title: 'Hệ thống Tra cứu & Phân bổ Phòng học HVHC&QTC',
+    description:
+      'Hệ thống tra cứu và phân bổ phòng học thông minh của APAG.',
+    images: [
+      {
+        url: '/site-icon.jpg',
+        width: 768,
+        height: 691,
+        alt: 'APAG',
+      },
+    ],
+  },
+  twitter: {
+    card: 'summary_large_image',
+    title: 'Hệ thống Tra cứu & Phân bổ Phòng học HVHC&QTC',
+    description:
+      'Hệ thống tra cứu và phân bổ phòng học thông minh của APAG.',
+    images: ['/site-icon.jpg'],
   },
   other: {
     google: 'notranslate',
