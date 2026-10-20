@@ -81,6 +81,7 @@ export function PortalShell({
   >("register");
   const [openIncidentCount, setOpenIncidentCount] = useState(0);
   const [now, setNow] = useState<Date | null>(null);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
 
   function selectAdminPanel(panel: AdminPanel) {
     setActivePanel(panel);
@@ -370,6 +371,7 @@ export function PortalShell({
               </h3>
               <button
                 type="button"
+                onClick={() => setNotificationsOpen(true)}
                 className="text-sm font-medium text-slate-500 hover:text-slate-700"
               >
                 Xem tất cả →
@@ -404,6 +406,54 @@ export function PortalShell({
             </ul>
           </div>
         </section>
+        {notificationsOpen && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4"
+            role="presentation"
+            onMouseDown={(event) => {
+              if (event.target === event.currentTarget) setNotificationsOpen(false);
+            }}
+          >
+            <section
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="all-notifications-title"
+              className="max-h-[min(620px,90vh)] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-5 shadow-2xl"
+            >
+              <div className="flex items-center justify-between gap-4">
+                <h2 id="all-notifications-title" className="text-lg font-bold text-slate-900">
+                  Tất cả thông báo
+                </h2>
+                <button
+                  type="button"
+                  onClick={() => setNotificationsOpen(false)}
+                  className="rounded-lg px-3 py-1.5 text-sm font-semibold text-slate-500 hover:bg-slate-100 hover:text-slate-800"
+                >
+                  Đóng
+                </button>
+              </div>
+              <ul className="mt-4 space-y-3">
+                {notifications.map(({ text, time, type }) => (
+                  <li key={`all-${text}`} className="flex items-start gap-3 rounded-xl bg-slate-50 px-3 py-3">
+                    <span
+                      className={[
+                        "mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full",
+                        type === "dot-blue" && "bg-[#2A6FD8]",
+                        type === "dot-green" && "bg-[#21b66f]",
+                        type === "dot-orange" && "bg-[#f0a43b]",
+                        type === "dot-slate" && "bg-slate-500",
+                      ].filter(Boolean).join(" ")}
+                    />
+                    <div>
+                      <p className="text-sm leading-5 text-slate-700">{text}</p>
+                      <p className="mt-1 text-xs text-slate-400">{time}</p>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          </div>
+        )}
       </div>
     );
 
