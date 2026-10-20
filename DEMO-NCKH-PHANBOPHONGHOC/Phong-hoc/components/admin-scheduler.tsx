@@ -318,6 +318,15 @@ function formatCourseEnd(courseEndAt?: string): string | null {
   }).format(new Date(`${courseEndAt}:00Z`));
 }
 
+function isCourseExpired(courseEndAt: string | undefined, now: Date): boolean {
+  if (!courseEndAt) return false;
+  const [datePart, timePart = "23:59"] = courseEndAt.split("T");
+  const [year, month, day] = datePart.split("-").map(Number);
+  const [hours, minutes] = timePart.split(":").map(Number);
+  const endAt = new Date(year, month - 1, day, hours, minutes);
+  return endAt.getTime() < now.getTime();
+}
+
 function getCourseCode(classInfo: ClassInfo): string | undefined {
   const code = classInfo.courseCode?.replace(/\s+/g, "");
   return code && /^[A-Z0-9-]+$/.test(code) && /\d/.test(code)
@@ -485,8 +494,22 @@ export function AdminScheduler() {
   );
 
   const displayAssignments = useMemo(
-    () => (result ? [...result.assignments, ...borrowedAssignments] : []),
-    [result, borrowedAssignments],
+    () =>
+      result
+        ? [
+            ...result.assignments.filter((assignment) => {
+              const classInfo = classes.find(
+                (item) => item.id === assignment.classId,
+              );
+              return !isCourseExpired(
+                classInfo ? courseTimelines.get(classInfo.id)?.courseEndAt : undefined,
+                now,
+              );
+            }),
+            ...borrowedAssignments,
+          ]
+        : [],
+    [result, borrowedAssignments, classes, courseTimelines, now],
   );
 
   const classById = useMemo(
