@@ -637,6 +637,7 @@ export function PortalShell({
                       className="absolute right-0 top-full z-50 mt-2 w-48 overflow-hidden rounded-xl border border-slate-200 bg-white p-1.5 shadow-lg"
                     >
                       <SignOutButton
+                        role="admin"
                         menuItem
                         className="flex w-full items-center gap-2 rounded-lg px-3 py-2.5 text-left text-sm font-medium text-slate-700 transition hover:bg-red-50 hover:text-red-700 focus-visible:bg-red-50 focus-visible:outline-none"
                       />
@@ -682,8 +683,16 @@ export function PortalShell({
               href="/"
               className="flex items-center gap-3 rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
-              <div className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-sm">
-                <Building2 className="size-6" />
+              <div className="flex h-11 w-20 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-white shadow-sm">
+                {!isAdmin ? (
+                  <img
+                    src="/apag-logo.png"
+                    alt="Logo APAG"
+                    className="size-full object-contain p-1"
+                  />
+                ) : (
+                  <Building2 className="size-6 text-primary" />
+                )}
               </div>
               <div>
                 <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
@@ -703,7 +712,7 @@ export function PortalShell({
                     : "Khu vực sinh viên"}
               </span>
               <ThemeToggle />
-              <SignOutButton className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600 transition hover:border-red-200 hover:bg-red-50 hover:text-red-700" />
+              <SignOutButton role={isLecturer ? "lecturer" : "student"} className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold text-slate-600 transition hover:border-red-200 hover:bg-red-50 hover:text-red-700" />
             </div>
           </div>
 

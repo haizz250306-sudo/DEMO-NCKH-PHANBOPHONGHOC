@@ -74,7 +74,7 @@ export function AuthForm({ role }: { role: PortalRole }) {
         })
         const result = await response.json()
         if (!response.ok) throw new Error(result.error ?? "Không thể tạo tài khoản quản trị.")
-        const supabase = createSupabaseBrowserClient()
+        const supabase = createSupabaseBrowserClient(role)
         const { error: signInError } = await supabase.auth.signInWithPassword({ email, password })
         if (signInError) {
           setNotice("Tài khoản quản trị đã tạo. Hãy đăng nhập bằng email và mật khẩu vừa đăng ký.")
@@ -83,7 +83,7 @@ export function AuthForm({ role }: { role: PortalRole }) {
           router.refresh()
         }
       } else if (registering) {
-        const supabase = createSupabaseBrowserClient()
+        const supabase = createSupabaseBrowserClient(role)
         const { data, error: signUpError } = await supabase.auth.signUp({
           email,
           password,
@@ -103,7 +103,7 @@ export function AuthForm({ role }: { role: PortalRole }) {
           setRegistering(false)
         }
       } else {
-        const supabase = createSupabaseBrowserClient()
+        const supabase = createSupabaseBrowserClient(role)
         const { error: signInError } = await supabase.auth.signInWithPassword({ email, password })
         if (signInError) throw signInError
         router.refresh()

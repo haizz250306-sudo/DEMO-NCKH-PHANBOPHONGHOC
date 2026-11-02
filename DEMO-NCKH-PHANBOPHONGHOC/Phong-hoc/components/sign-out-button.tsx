@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { LogOut } from "lucide-react"
 import { createSupabaseBrowserClient } from "@/lib/supabase/client"
+import type { PortalSessionRole } from "@/lib/supabase/portal-session"
 
 export function SignOutButton({
   className = "",
@@ -10,12 +11,14 @@ export function SignOutButton({
   redirectTo = "/",
   label = "Đăng xuất",
   autoSignOut = false,
+  role = "student",
 }: {
   className?: string
   menuItem?: boolean
   redirectTo?: string
   label?: string
   autoSignOut?: boolean
+  role?: PortalSessionRole
 }) {
   const [error, setError] = useState("")
   const [busy, setBusy] = useState(false)
@@ -25,7 +28,7 @@ export function SignOutButton({
     setError("")
     setBusy(true)
     try {
-      const { error: signOutError } = await createSupabaseBrowserClient().auth.signOut()
+      const { error: signOutError } = await createSupabaseBrowserClient(role).auth.signOut()
       if (signOutError) {
         setError(signOutError.message)
         setBusy(false)

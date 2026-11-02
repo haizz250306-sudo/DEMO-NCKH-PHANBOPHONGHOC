@@ -29,7 +29,7 @@ export async function PortalAuth({
     )
   }
 
-  const supabase = await createSupabaseServerClient()
+  const supabase = await createSupabaseServerClient(role)
   const {
     data: { session },
     error: sessionError,
@@ -56,7 +56,7 @@ export async function PortalAuth({
       <AuthMessage
         title="Không thể xác thực phiên đăng nhập"
         message={userError?.message ?? "Phiên đăng nhập hết hạn. Hãy đăng nhập lại."}
-        action={<SignOutButton />}
+        action={<SignOutButton role={role} />}
       />
     )
   }
@@ -91,6 +91,7 @@ export async function PortalAuth({
         }
         action={
           <SignOutButton
+            role={role}
             redirectTo={`/${role}`}
             label={`Làm mới cổng ${ROLE_LABELS[role]}`}
             autoSignOut

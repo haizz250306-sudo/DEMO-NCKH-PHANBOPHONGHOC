@@ -1,5 +1,15 @@
 import { createServerClient } from "@supabase/ssr"
 import { NextResponse, type NextRequest } from "next/server"
+import {
+  getPortalSessionCookieName,
+  type PortalSessionRole,
+} from "@/lib/supabase/portal-session"
+
+function roleFromPathname(pathname: string): PortalSessionRole {
+  if (pathname === "/admin" || pathname.startsWith("/admin/")) return "admin"
+  if (pathname === "/lecturer" || pathname.startsWith("/lecturer/")) return "lecturer"
+  return "student"
+}
 
 export async function proxy(request: NextRequest) {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL
@@ -7,7 +17,11 @@ export async function proxy(request: NextRequest) {
   if (!url || !anonKey) return NextResponse.next({ request })
 
   let response = NextResponse.next({ request })
+  const role = roleFromPathname(request.nextUrl.pathname)
   const supabase = createServerClient(url, anonKey, {
+    cookieOptions: {
+      name: getPortalSessionCookieName(role),
+    },
     cookies: {
       getAll() {
         return request.cookies.getAll()

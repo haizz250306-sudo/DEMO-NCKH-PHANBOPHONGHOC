@@ -21,7 +21,12 @@ export async function GET(request: NextRequest) {
     })
   }
 
-  const supabase = await createSupabaseServerClient()
+  const role = destination === "/admin"
+    ? "admin"
+    : destination === "/lecturer"
+      ? "lecturer"
+      : "student"
+  const supabase = await createSupabaseServerClient(role)
   const { error } = await supabase.auth.exchangeCodeForSession(code)
   if (error) {
     return new Response("Không thể xác nhận tài khoản. Hãy đăng ký lại hoặc đăng nhập.", {
