@@ -27,6 +27,7 @@ export function TimetableUpload({
   const [error, setError] = useState("")
   const [progress, setProgress] = useState<{ message: string; percent: number } | null>(null)
   const [notice, setNotice] = useState("")
+  const [isSubmitting, setIsSubmitting] = useState(false)
 
   async function handleFile(file?: File) {
     if (!file) return
@@ -61,6 +62,7 @@ export function TimetableUpload({
   }
 
   function importClasses(mode: ImportMode) {
+    if (isSubmitting || classes.length === 0) return
     if (
       mode === "replace" &&
       !window.confirm(
@@ -73,43 +75,46 @@ export function TimetableUpload({
     const incompleteCount = classes.filter(
       (classInfo) => classInfo.needsReview?.length,
     ).length
-    const summary = onImport(classes, mode)
-    if (mode === "replace") {
-      setClasses([])
+    setIsSubmitting(true)
+    try {
+      const summary = onImport(classes, mode)
+      if (mode === "replace") {
+        setClasses([])
+      }
+      const importedKeys = new Set(
+        [...summary.duplicates, ...summary.updated].map((item) => item.key),
+      )
+      setClasses((current) =>
+        current.filter((classInfo) => !importedKeys.has(classImportKey(classInfo))),
+      )
+      if (summary.duplicates.length > 0) {
+        setIssues((current) => [
+          ...current,
+          ...summary.duplicates.map(({ label }) => ({
+            row: 0,
+            source: label,
+            message: "Bỏ qua vì lớp này đã có trong thời khóa biểu.",
+          })),
+        ])
+      }
+      const changes = [
+        summary.added > 0
+          ? mode === "replace"
+            ? `Đã thay thời khóa biểu bằng ${summary.added} lớp`
+            : `Đã thêm ${summary.added} lớp`
+          : "",
+        summary.updated.length > 0
+          ? `đã cập nhật ${summary.updated.length} lớp đã có`
+          : "",
+      ].filter(Boolean)
+      setNotice(
+        changes.length > 0
+          ? `${changes.join(" và ")}. Đã xếp phòng thành công!${incompleteCount > 0 ? ` ${incompleteCount} lớp còn thiếu thông tin nên sẽ chưa được xếp phòng.` : ""}`
+          : "Không có lớp mới hoặc thay đổi; các lớp đọc được đều đã tồn tại.",
+      )
+    } finally {
+      setIsSubmitting(false)
     }
-    const importedKeys = new Set(
-      [...summary.duplicates, ...summary.updated].map((item) => item.key),
-    )
-    setClasses((current) =>
-      current.filter((classInfo) => !importedKeys.has(classImportKey(classInfo))),
-    )
-    if (summary.duplicates.length > 0) {
-      setIssues((current) => [
-        ...current,
-        ...summary.duplicates.map(({ label }) => ({
-          row: 0,
-          source: label,
-          message: "Bỏ qua vì lớp này đã có trong thời khóa biểu.",
-        })),
-      ])
-    }
-    const changes = [
-      summary.added > 0
-        ? mode === "replace"
-          ? `Đã thay thời khóa biểu bằng ${summary.added} lớp`
-          : `Đã thêm ${summary.added} lớp`
-        : "",
-      summary.updated.length > 0
-        ? `đã cập nhật ${summary.updated.length} lớp đã có`
-        : "",
-    ].filter(Boolean)
-    setNotice(
-      changes.length > 0
-        ? mode === "replace"
-          ? `${changes.join(" và ")}. Hệ thống đã phân bổ lại theo dữ liệu trong file.${incompleteCount > 0 ? ` ${incompleteCount} lớp còn thiếu thông tin nên sẽ chưa được xếp phòng.` : ""}`
-          : `${changes.join(" và ")} vào thời khóa biểu. Bấm “Sắp xếp tự động” để tối ưu lại phòng.${incompleteCount > 0 ? ` ${incompleteCount} lớp còn thiếu thông tin nên sẽ chưa được xếp phòng.` : ""}`
-        : "Không có lớp mới hoặc thay đổi; các lớp đọc được đều đã tồn tại.",
-    )
   }
 
   return (
@@ -124,16 +129,7 @@ export function TimetableUpload({
               Tải thời khóa biểu lên
             </h2>
             <p className="mt-1 max-w-3xl text-xs leading-5 text-slate-600">
-              Đọc Excel, CSV, PDF có chữ hoặc PDF/ảnh scan bằng OCR tiếng Việt.
-              Tệp được xử lý tại trình duyệt của bạn; hãy rà soát bản xem trước
-              trước khi thêm vào lịch.
-            </p>
-            <p className="mt-2 text-[11px] leading-5 text-slate-500">
-              Nên có tiêu đề cột: Tên học phần, Mã học phần, Tên lớp, Lớp số,
-              Sĩ số (hoặc Số lượng sinh viên/Số SV), Số tiết học hoặc Từ
-              tiết/Đến tiết, Thứ và Ca học. Số tín chỉ không được dùng thay
-              cho số tiết. Ảnh/PDF scan cần rõ nét;
-              OCR có thể cần kiểm tra lại.
+              Tải file Excel hoặc PDF thời khóa biểu.
             </p>
           </div>
         </div>
@@ -212,18 +208,22 @@ export function TimetableUpload({
             <div className="flex flex-wrap gap-2">
               <button
                 type="button"
+                disabled={isSubmitting}
                 onClick={() => importClasses("replace")}
-                className="rounded-xl bg-emerald-700 px-4 py-2.5 text-sm font-bold text-white hover:bg-emerald-800"
+                className="rounded-xl bg-emerald-700 px-4 py-2.5 text-sm font-bold text-white hover:bg-emerald-800 disabled:cursor-wait disabled:opacity-60"
               >
-                Dùng riêng {classes.length} lớp này
+                {isSubmitting ? "Đang xếp phòng..." : `Tải và xếp phòng ${classes.length} lớp`}
               </button>
-              <button
-                type="button"
-                onClick={() => importClasses("merge")}
-                className="rounded-xl border border-emerald-300 bg-white px-4 py-2.5 text-sm font-bold text-emerald-800 hover:bg-emerald-50"
-              >
-                Gộp thêm vào lịch hiện tại
-              </button>
+              {currentClassCount > 0 && (
+                <button
+                  type="button"
+                  disabled={isSubmitting}
+                  onClick={() => importClasses("merge")}
+                  className="rounded-xl border border-emerald-300 bg-white px-4 py-2.5 text-sm font-bold text-emerald-800 hover:bg-emerald-50 disabled:cursor-wait disabled:opacity-60"
+                >
+                  {isSubmitting ? "Đang xếp phòng..." : "Gộp thêm vào lịch hiện tại"}
+                </button>
+              )}
             </div>
           </div>
 

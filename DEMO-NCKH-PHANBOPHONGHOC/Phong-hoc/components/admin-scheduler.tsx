@@ -1,7 +1,7 @@
 "use client";
 
 import { createPortal } from "react-dom";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import * as XLSX from "xlsx";
 import {
   Wand2,
@@ -56,10 +56,15 @@ import {
   ALLOCATION_ALGORITHM_VERSION,
   clearAllocationSnapshot,
   clearImportedClasses,
+  getCurrentSemesterKey,
   loadImportedClasses,
   loadAllocationSnapshot,
-  saveImportedClasses,
+  listAllocationHistory,
+  saveAllocationHistory,
+  saveSemesterClasses,
   saveAllocationSnapshot,
+  type AllocationHistoryEntry,
+  type SemesterKey,
 } from "@/lib/allocation-store";
 import {
   BORROW_REQUESTS_UPDATED_EVENT,
@@ -69,6 +74,7 @@ import {
 } from "@/lib/borrow-store";
 
 const ROOMS = SHEET_ROOMS;
+const INITIAL_SEMESTER_KEY: SemesterKey = "2026-2027-HK1";
 
 type ImportPreviewRow = {
   rowNumber: number;
@@ -367,8 +373,14 @@ const CAMPUS_SCHEDULE_GROUPS = [
 ];
 
 export function AdminScheduler() {
+  const [semesterKey, setSemesterKey] = useState<SemesterKey>(
+    getCurrentSemesterKey(),
+  );
   const [classes, setClasses] = useState<ClassInfo[]>(SHEET_CLASSES);
   const [result, setResult] = useState<ScheduleResult | null>(null);
+  const [allocationHistory, setAllocationHistory] = useState<
+    AllocationHistoryEntry[]
+  >([]);
   const [importState, setImportState] = useState<ImportState | null>(null);
   const [isImporting, setIsImporting] = useState(false);
   const [selectedDay, setSelectedDay] = useState<number>(2);
@@ -383,6 +395,12 @@ export function AdminScheduler() {
   );
   const [borrowRequests, setBorrowRequests] = useState<BorrowRequest[]>([]);
   const [now, setNow] = useState(() => new Date());
+  const [isSemesterReady, setIsSemesterReady] = useState(true);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [uploadResetVersion, setUploadResetVersion] = useState(0);
+  const [pendingFocusClassId, setPendingFocusClassId] = useState<string | null>(
+    null,
+  );
 
   useEffect(() => {
     function clearHighlight(event: MouseEvent) {
@@ -399,6 +417,37 @@ export function AdminScheduler() {
     const intervalId = window.setInterval(() => setNow(new Date()), 1000);
     return () => window.clearInterval(intervalId);
   }, []);
+
+  useEffect(() => {
+    if (!pendingFocusClassId || !result) return;
+    const assignment = result.assignments.some(
+      (item) => item.classId === pendingFocusClassId,
+    );
+    const targetId = assignment
+      ? `assignment-${pendingFocusClassId}`
+      : "unassigned-classes";
+    let attempts = 0;
+    let animationId = 0;
+    const focusAfterRender = () => {
+      const target = document.getElementById(targetId);
+      if (target) {
+        target.scrollIntoView({ behavior: "smooth", block: "center" });
+        setPendingFocusClassId(null);
+        return;
+      }
+      attempts += 1;
+      if (attempts < 3) {
+        animationId = window.requestAnimationFrame(focusAfterRender);
+      } else {
+        document
+          .getElementById("allocation-results")
+          ?.scrollIntoView({ behavior: "smooth", block: "start" });
+        setPendingFocusClassId(null);
+      }
+    };
+    animationId = window.requestAnimationFrame(focusAfterRender);
+    return () => window.cancelAnimationFrame(animationId);
+  }, [pendingFocusClassId, result, selectedDay, selectedCampus, selectedBuilding, selectedCohort]);
 
   useEffect(() => {
     const refreshBorrowRequests = () => setBorrowRequests(loadBorrowRequests());
@@ -418,10 +467,23 @@ export function AdminScheduler() {
   }, []);
 
   useEffect(() => {
-    const importedClasses = loadImportedClasses();
-    if (importedClasses) setClasses(importedClasses);
-    const snapshot = loadAllocationSnapshot();
-    if (!snapshot) return;
+    setIsSemesterReady(false);
+    const importedClasses = loadImportedClasses(semesterKey);
+    const semesterClasses =
+      importedClasses ??
+      (semesterKey === INITIAL_SEMESTER_KEY ? SHEET_CLASSES : []);
+    if (!importedClasses && semesterKey === INITIAL_SEMESTER_KEY) {
+      saveSemesterClasses(INITIAL_SEMESTER_KEY, SHEET_CLASSES);
+    }
+    setClasses(semesterClasses);
+    const snapshot = loadAllocationSnapshot(semesterKey);
+    if (!snapshot) {
+      setResult(null);
+      setNewClassIds([]);
+      setAllocationHistory(listAllocationHistory(semesterKey));
+      setIsSemesterReady(true);
+      return;
+    }
     setClasses(snapshot.classes);
     setResult(
       snapshot.algorithmVersion === ALLOCATION_ALGORITHM_VERSION
@@ -433,7 +495,9 @@ export function AdminScheduler() {
         .filter((item) => !SHEET_CLASSES.some((base) => base.id === item.id))
         .map((item) => item.id),
     );
-  }, []);
+    setAllocationHistory(listAllocationHistory(semesterKey));
+    setIsSemesterReady(true);
+  }, [semesterKey]);
 
   useEffect(() => {
     if (result) {
@@ -441,6 +505,7 @@ export function AdminScheduler() {
         classes,
         result,
         algorithmVersion: ALLOCATION_ALGORITHM_VERSION,
+        semesterKey,
       });
     }
   }, [classes, result]);
@@ -518,7 +583,74 @@ export function AdminScheduler() {
   );
 
   function handleSchedule() {
-    setResult(autoSchedule(classes, ROOMS));
+    const nextResult = autoSchedule(classes, ROOMS);
+    const snapshot = {
+      classes,
+      result: nextResult,
+      algorithmVersion: ALLOCATION_ALGORITHM_VERSION,
+      semesterKey,
+    };
+    setResult(nextResult);
+    saveAllocationSnapshot(snapshot);
+    saveAllocationHistory(snapshot, "auto-schedule");
+    setAllocationHistory(listAllocationHistory(semesterKey));
+    focusAllocationResults();
+  }
+
+  function focusAllocationResults() {
+    window.setTimeout(() => {
+      document
+        .getElementById("allocation-results")
+        ?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 0);
+  }
+
+  function focusUpdatedClass(
+    classInfo: ClassInfo,
+    schedule: ScheduleResult,
+  ) {
+    const assignment = schedule.assignments.find(
+      (item) => item.classId === classInfo.id,
+    );
+    const room = assignment ? roomById.get(assignment.roomId) : undefined;
+
+    if (assignment) {
+      setSelectedDay(assignment.day);
+      setSelectedCampus(room?.campus ?? "all");
+      setSelectedBuilding(room?.building ?? "all");
+      setSelectedCohort(classInfo.cohort ?? "all");
+      setHighlightedClassId(classInfo.id);
+    }
+
+    setPendingFocusClassId(classInfo.id);
+  }
+
+  function handleSemesterChange(nextSemester: SemesterKey) {
+    setSemesterKey(nextSemester);
+    const storedClasses = loadImportedClasses(nextSemester);
+    const nextClasses =
+      storedClasses ??
+      (nextSemester === INITIAL_SEMESTER_KEY ? SHEET_CLASSES : []);
+    if (nextSemester === INITIAL_SEMESTER_KEY && !storedClasses) {
+      saveSemesterClasses(INITIAL_SEMESTER_KEY, SHEET_CLASSES);
+    }
+    const snapshot = loadAllocationSnapshot(nextSemester);
+    setClasses(snapshot?.classes ?? nextClasses);
+    setResult(
+      snapshot
+        ? snapshot.algorithmVersion === ALLOCATION_ALGORITHM_VERSION
+          ? snapshot.result
+          : autoSchedule(snapshot.classes, ROOMS)
+        : null,
+    );
+    setNewClassIds(
+      snapshot
+        ? snapshot.classes
+            .filter((item) => !SHEET_CLASSES.some((base) => base.id === item.id))
+            .map((item) => item.id)
+        : [],
+    );
+    setAllocationHistory(listAllocationHistory(nextSemester));
   }
 
   async function handleImportFile(file: File | undefined) {
@@ -568,12 +700,26 @@ export function AdminScheduler() {
   function handleConfirmImport() {
     if (!importState || importState.errors.length || !importState.classes.length)
       return;
-    saveImportedClasses(importState.classes);
-    clearAllocationSnapshot();
-    setClasses(importState.classes);
-    setResult(null);
-    setNewClassIds(importState.classes.map((item) => item.id));
+    const nextClasses = importState.classes;
+    const nextResult = autoSchedule(nextClasses, ROOMS);
+    const snapshot = {
+      classes: nextClasses,
+      result: nextResult,
+      algorithmVersion: ALLOCATION_ALGORITHM_VERSION,
+      semesterKey,
+    };
+    saveSemesterClasses(semesterKey, nextClasses);
+    saveAllocationSnapshot(snapshot);
+    saveAllocationHistory(snapshot, "import");
+    setClasses(nextClasses);
+    setResult(nextResult);
+    setAllocationHistory(listAllocationHistory(semesterKey));
+    setNewClassIds(nextClasses.map((item) => item.id));
     setImportState(null);
+    setSuccessMessage(
+      `Đã xếp phòng thành công! Đã thêm ${nextClasses.length} lớp vào thời khóa biểu.`,
+    );
+    focusAllocationResults();
   }
 
   function handleAddClass(cls: Omit<ClassInfo, "id">): string | null {
@@ -631,11 +777,25 @@ export function AdminScheduler() {
       }
 
       const nextResult = autoSchedule(nextClasses, ROOMS);
-      saveImportedClasses(nextClasses);
-      clearAllocationSnapshot();
+      const snapshot = {
+        classes: nextClasses,
+        result: nextResult,
+        algorithmVersion: ALLOCATION_ALGORITHM_VERSION,
+        semesterKey,
+      };
+      saveSemesterClasses(semesterKey, nextClasses);
+      saveAllocationSnapshot(snapshot);
+      saveAllocationHistory(snapshot, "import");
       setClasses(nextClasses);
       setResult(nextResult);
+      setAllocationHistory(listAllocationHistory(semesterKey));
       setNewClassIds(nextClasses.map((classInfo) => classInfo.id));
+      setSuccessMessage(
+        nextResult.unassigned.length === 0
+          ? `Đã xếp phòng thành công! Đã tải ${nextClasses.length} lớp.`
+          : `Đã xếp phòng thành công cho dữ liệu hợp lệ. ${nextClasses.length - nextResult.unassigned.length} lớp đã được phân bổ; một số lớp cần xử lý thêm.`,
+      );
+      focusAllocationResults();
 
       return {
         added: nextClasses.length,
@@ -758,39 +918,30 @@ export function AdminScheduler() {
       ...classes.map((classInfo) => updatedById.get(classInfo.id) ?? classInfo),
       ...accepted,
     ];
+    const nextResult = autoSchedule(nextClasses, ROOMS);
+    const snapshot = {
+      classes: nextClasses,
+      result: nextResult,
+      algorithmVersion: ALLOCATION_ALGORITHM_VERSION,
+      semesterKey,
+    };
+    saveSemesterClasses(semesterKey, nextClasses);
+    saveAllocationSnapshot(snapshot);
+    saveAllocationHistory(snapshot, "import");
     setClasses(nextClasses);
     setNewClassIds((current) => [
       ...current,
       ...updated.map((classInfo) => classInfo.id),
       ...accepted.map((classInfo) => classInfo.id),
     ]);
-    setResult((current) =>
-      current
-        ? {
-            ...current,
-            assignments: current.assignments.filter(
-              (assignment) => !updatedById.has(assignment.classId),
-            ),
-            unassigned: [
-              ...current.unassigned.filter(
-                (item) => !updatedById.has(item.classInfo.id),
-              ),
-              ...updated.map((classInfo) => ({
-                classInfo,
-                reason:
-                  "Thông tin lớp vừa được cập nhật. Bấm “Sắp xếp tự động” để phân bổ lại toàn bộ phòng.",
-              })),
-              ...accepted.map((classInfo) => ({
-                classInfo,
-                reason:
-                  classInfo.size < 1 || classInfo.needsReview?.length
-                    ? `Chưa thể xếp phòng cho lớp này: cần bổ sung ${classInfo.needsReview?.join(", ") || "sĩ số"} trước.`
-                    : "Lớp mới nhập đang chờ phân bổ. Bấm “Sắp xếp tự động” để tối ưu lại phòng cho toàn bộ thời khóa biểu.",
-              })),
-            ],
-          }
-        : autoSchedule(nextClasses, ROOMS),
+    setResult(nextResult);
+    setAllocationHistory(listAllocationHistory(semesterKey));
+    setSuccessMessage(
+      nextResult.unassigned.length === 0
+        ? `Đã xếp phòng thành công! Đã thêm ${accepted.length} lớp.`
+        : `Đã xếp phòng thành công cho dữ liệu hợp lệ. Đã thêm ${accepted.length} lớp; một số lớp cần xử lý thêm.`,
     );
+    focusAllocationResults();
 
     return {
       added: accepted.length,
@@ -815,12 +966,14 @@ export function AdminScheduler() {
   }
 
   function handleResetData() {
-    setClasses(SHEET_CLASSES);
+    setClasses([]);
     setResult(null);
-    clearAllocationSnapshot();
-    clearImportedClasses();
+    clearAllocationSnapshot(semesterKey);
+    clearImportedClasses(semesterKey);
     setEditingClassId(null);
     setNewClassIds([]);
+    setSuccessMessage(null);
+    setUploadResetVersion((current) => current + 1);
   }
 
   // Xếp thủ công 1 lớp bị đẩy ra ngoài vào phòng đủ điều kiện đã chọn.
@@ -860,6 +1013,31 @@ export function AdminScheduler() {
         .getElementById(`assignment-${cls.id}`)
         ?.scrollIntoView({ behavior: "smooth", block: "center" });
     }, 0);
+  }
+
+  function handleUpdateUnassignedClass(updatedClass: ClassInfo) {
+    const nextClasses = classes.map((item) =>
+      item.id === updatedClass.id ? updatedClass : item,
+    );
+    const nextResult = autoSchedule(nextClasses, ROOMS);
+    const snapshot = {
+      classes: nextClasses,
+      result: nextResult,
+      algorithmVersion: ALLOCATION_ALGORITHM_VERSION,
+      semesterKey,
+    };
+    setClasses(nextClasses);
+    setResult(nextResult);
+    saveSemesterClasses(semesterKey, nextClasses);
+    saveAllocationSnapshot(snapshot);
+    saveAllocationHistory(snapshot, "manual-update");
+    setAllocationHistory(listAllocationHistory(semesterKey));
+    setSuccessMessage(
+      nextResult.unassigned.length === 0
+        ? "Đã xếp phòng thành công! Dữ liệu lớp vừa bổ sung đã được cập nhật."
+        : "Đã bổ sung dữ liệu thành công. Lớp chưa được xếp phòng vì vẫn còn thiếu điều kiện phù hợp.",
+    );
+    focusUpdatedClass(updatedClass, nextResult);
   }
 
   function handleMoveClass(classId: string, alt: AltSlot) {
@@ -1024,8 +1202,105 @@ export function AdminScheduler() {
   ]);
 
   return (
-    <div className="space-y-6">
+    <div className="relative space-y-6">
+      {!isSemesterReady && (
+        <div className="pointer-events-none absolute right-4 top-4 z-10 inline-flex items-center gap-2 rounded-full bg-white/90 px-3 py-1.5 text-xs font-semibold text-sky-700 shadow-sm">
+          <div className="size-3 animate-spin rounded-full border-2 border-sky-100 border-t-sky-600" />
+          Đang đồng bộ dữ liệu...
+        </div>
+      )}
+      {successMessage && (
+        <div
+          className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/35 p-4"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setSuccessMessage(null);
+          }}
+        >
+          <section
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="scheduler-success-title"
+            className="w-full max-w-md rounded-2xl border border-emerald-200 bg-white p-5 shadow-2xl"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2
+                  id="scheduler-success-title"
+                  className="text-base font-bold text-emerald-900"
+                >
+                  Cập nhật thành công
+                </h2>
+                <p className="mt-2 text-sm leading-6 text-slate-600">
+                  {successMessage}
+                </p>
+              </div>
+              <button
+                type="button"
+                aria-label="Đóng thông báo"
+                onClick={() => setSuccessMessage(null)}
+                className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+              >
+                <X className="size-5" />
+              </button>
+            </div>
+            <div className="mt-5 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setSuccessMessage(null)}
+                className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-700"
+              >
+                OK
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+      <section className="rounded-2xl border border-sky-200 bg-sky-50/70 p-4 shadow-sm">
+        <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+          <div>
+            <h2 className="text-base font-bold text-sky-950">
+              Học kỳ và năm học
+            </h2>
+            <p className="mt-1 text-xs leading-5 text-sky-800">
+              Thời khóa biểu, kết quả xếp phòng và lịch sử được lưu riêng cho từng học kỳ.
+            </p>
+          </div>
+          <label className="text-sm font-semibold text-sky-950">
+            Học kỳ đang làm việc
+            <select
+              value={semesterKey}
+              onChange={(event) =>
+                handleSemesterChange(event.target.value as SemesterKey)
+              }
+              className="mt-1 block min-w-56 rounded-lg border border-sky-200 bg-white px-3 py-2 text-sm font-medium text-slate-800"
+            >
+              <option value="2025-2026-HK2">Học kỳ 2 năm học 2025-2026</option>
+              <option value="2026-2027-HK1">Học kỳ 1 năm học 2026-2027</option>
+              <option value="2026-2027-HK2">Học kỳ 2 năm học 2026-2027</option>
+              <option value="2027-2028-HK1">Học kỳ 1 năm học 2027-2028</option>
+            </select>
+          </label>
+        </div>
+        {allocationHistory.length > 0 && (
+          <div className="mt-3 border-t border-sky-200 pt-3 text-xs text-sky-900">
+            <span className="font-bold">Lần cập nhật gần nhất: </span>
+            {new Date(allocationHistory[0].savedAt ?? "").toLocaleString("vi-VN")}
+            {" · "}
+            {allocationHistory[0].action === "auto-schedule"
+              ? "Sắp xếp tự động"
+              : allocationHistory[0].action === "import"
+                ? "Nhập thời khóa biểu"
+                : "Cập nhật lịch"}
+            <span className="ml-2 text-sky-700">
+              ({allocationHistory.length} bản ghi lịch sử)
+            </span>
+          </div>
+        )}
+      </section>
       <TimetableUpload
+        key={`${semesterKey}-${uploadResetVersion}`}
         onImport={handleImportClasses}
         currentClassCount={classes.length}
       />
@@ -1092,7 +1367,7 @@ export function AdminScheduler() {
             className="flex items-center gap-2 rounded-xl border border-border bg-card px-4 py-2.5 text-sm font-semibold text-foreground transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
           >
             <RotateCcw className="size-4" />
-            Khôi phục TKB mẫu
+            Khôi phục TKB gốc
           </button>
           <button
             type="button"
@@ -1107,6 +1382,7 @@ export function AdminScheduler() {
 
       {result && (
         <section
+          id="allocation-results"
           className="grid grid-cols-2 gap-3 md:grid-cols-4 md:gap-4"
           aria-label="Kết quả sắp xếp"
         >
@@ -1293,13 +1569,6 @@ export function AdminScheduler() {
 
       {result && (
         <>
-          <NewClassesPanel
-            classes={newClassIds
-              .map((id) => classById.get(id))
-              .filter((item): item is ClassInfo => Boolean(item))}
-            result={result}
-            onShowAssignment={showAssignment}
-          />
           {/* Bộ chọn thứ trong tuần */}
           <div
             className="flex flex-wrap gap-2"
@@ -1579,7 +1848,7 @@ export function AdminScheduler() {
                                       className={[
                                         "rounded-xl border bg-card p-3 shadow-sm transition-all hover:shadow-md",
                                         highlightedClassId === a.classId
-                                          ? "border-amber-400 bg-amber-50/70 shadow-[0_0_0_4px_rgba(251,191,36,0.28),0_0_24px_rgba(251,191,36,0.35)]"
+                                          ? "border-amber-400 bg-amber-50/70 ring-2 ring-amber-300/80 shadow-[0_0_0_4px_rgba(251,191,36,0.28),0_0_24px_rgba(251,191,36,0.35)]"
                                           : "border-border",
                                       ].join(" ")}
                                     >
@@ -1691,7 +1960,11 @@ export function AdminScheduler() {
             </div>
           </section>
 
-          <UnassignedPanel result={result} onPlace={handlePlaceClass} />
+          <UnassignedPanel
+            result={result}
+            onPlace={handlePlaceClass}
+            onUpdateClass={handleUpdateUnassignedClass}
+          />
         </>
       )}
 
@@ -2253,9 +2526,11 @@ function ModalPortal({ children }: { children: React.ReactNode }) {
 function UnassignedPanel({
   result,
   onPlace,
+  onUpdateClass,
 }: {
   result: ScheduleResult;
   onPlace: (classInfo: ClassInfo, alt: AltSlot) => void;
+  onUpdateClass: (classInfo: ClassInfo) => void;
 }) {
   const missingInfoCount = result.unassigned.filter(
     ({ classInfo }) =>
@@ -2270,17 +2545,7 @@ function UnassignedPanel({
   const noRoomCount =
     result.unassigned.length - missingInfoCount - pendingRescheduleCount;
 
-  if (result.unassigned.length === 0) {
-    return (
-      <div className="flex items-center gap-3 rounded-2xl border border-emerald-200 bg-emerald-50/70 p-5">
-        <CheckCircle2 className="size-6 shrink-0 text-emerald-600" />
-        <p className="text-sm font-semibold text-emerald-800">
-          Tất cả lớp đã được bố trí phòng thành công. Không có lớp nào bị đẩy ra
-          ngoài.
-        </p>
-      </div>
-    );
-  }
+  if (result.unassigned.length === 0) return null;
 
   return (
     <div
@@ -2324,6 +2589,7 @@ function UnassignedPanel({
             reason={u.reason}
             assignments={result.assignments}
             onPlace={onPlace}
+            onUpdateClass={onUpdateClass}
           />
         ))}
       </ul>
@@ -2336,20 +2602,77 @@ function UnassignedItem({
   reason,
   assignments,
   onPlace,
+  onUpdateClass,
 }: {
   classInfo: ClassInfo;
   reason: string;
   assignments: import("@/lib/scheduling").Assignment[];
   onPlace: (classInfo: ClassInfo, alt: AltSlot) => void;
+  onUpdateClass: (classInfo: ClassInfo) => void;
 }) {
   const [alts, setAlts] = useState<AltSlot[] | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [size, setSize] = useState(classInfo.size > 0 ? String(classInfo.size) : "");
+  const [day, setDay] = useState(String(classInfo.day || 2));
+  const [shift, setShift] = useState<Shift>(classInfo.shift);
+  const [startPeriod, setStartPeriod] = useState(
+    String(classInfo.startPeriod ?? SHIFT_PERIODS[classInfo.shift][0]),
+  );
+  const [endPeriod, setEndPeriod] = useState(
+    String(classInfo.endPeriod ?? SHIFT_PERIODS[classInfo.shift][0]),
+  );
+  const editorRef = useRef<HTMLLIElement>(null);
+
+  useEffect(() => {
+    if (!editing) return;
+    function closeEditor(event: MouseEvent) {
+      if (
+        event.target instanceof Node &&
+        !editorRef.current?.contains(event.target)
+      ) {
+        setEditing(false);
+      }
+    }
+    document.addEventListener("mousedown", closeEditor);
+    return () => document.removeEventListener("mousedown", closeEditor);
+  }, [editing]);
 
   function handleFind() {
     setAlts(findAlternatives(classInfo, ROOMS, assignments, 500));
   }
 
+  function handleSaveDetails(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const parsedSize = Number(size);
+    const parsedDay = Number(day);
+    const parsedStart = Number(startPeriod);
+    const parsedEnd = Number(endPeriod);
+    const needsReview = [
+      ...(Number.isInteger(parsedSize) && parsedSize > 0 ? [] : ["sĩ số"]),
+      ...(DAYS.includes(parsedDay as (typeof DAYS)[number]) ? [] : ["thứ"]),
+      ...(parsedEnd >= parsedStart && parsedStart > 0 ? [] : ["tiết học"]),
+    ];
+    onUpdateClass({
+      ...classInfo,
+      size: Number.isInteger(parsedSize) && parsedSize > 0 ? parsedSize : 0,
+      day: parsedDay,
+      shift,
+      periods: parsedEnd - parsedStart + 1,
+      startPeriod: parsedStart,
+      endPeriod: parsedEnd,
+      needsReview,
+    });
+    setEditing(false);
+  }
+
+  const missingFields = classInfo.needsReview ?? [];
+  const missingLabel =
+    missingFields.length > 0
+      ? `Bổ sung ${missingFields.join(", ")}`
+      : "Cần bổ sung sĩ số";
+
   return (
-    <li className="rounded-xl border border-red-200 bg-white/80 p-4">
+    <li ref={editorRef} className="rounded-xl border border-red-200 bg-white/80 p-4">
       <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
         <div>
           <div className="flex flex-wrap items-center gap-2">
@@ -2375,10 +2698,95 @@ function UnassignedItem({
         >
           <Sparkles className="size-4" />
           {classInfo.size < 1 || classInfo.needsReview?.length
-            ? "Cần bổ sung sĩ số"
+            ? missingLabel
             : "Tìm slot thay thế"}
         </button>
+        {Boolean(classInfo.needsReview?.length || classInfo.size < 1) && (
+          <button
+            type="button"
+            onClick={() => setEditing((current) => !current)}
+            className="rounded-xl border border-amber-300 bg-amber-50 px-4 py-2 text-sm font-semibold text-amber-800 hover:bg-amber-100"
+          >
+            {editing ? "Đóng bổ sung" : "Bổ sung dữ liệu"}
+          </button>
+        )}
       </div>
+      {editing && (
+        <form
+          onSubmit={handleSaveDetails}
+          className="mt-4 grid gap-3 rounded-xl border border-amber-200 bg-amber-50/70 p-3 sm:grid-cols-2 lg:grid-cols-5"
+        >
+          <label className="text-xs font-semibold text-slate-700">
+            Sĩ số
+            <input
+              type="number"
+              min="1"
+              value={size}
+              onChange={(event) => setSize(event.target.value)}
+              className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-2.5 py-2 text-sm"
+              required
+            />
+          </label>
+          <label className="text-xs font-semibold text-slate-700">
+            Thứ
+            <select
+              value={day}
+              onChange={(event) => setDay(event.target.value)}
+              className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-2.5 py-2 text-sm"
+            >
+              {DAYS.map((item) => (
+                <option key={item} value={item}>
+                  {DAY_LABELS[item]}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="text-xs font-semibold text-slate-700">
+            Ca học
+            <select
+              value={shift}
+              onChange={(event) => setShift(event.target.value as Shift)}
+              className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-2.5 py-2 text-sm"
+            >
+              {SHIFTS.map((item) => (
+                <option key={item} value={item}>
+                  {SHIFT_LABELS[item]}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="text-xs font-semibold text-slate-700">
+            Từ tiết
+            <input
+              type="number"
+              min="1"
+              max="13"
+              value={startPeriod}
+              onChange={(event) => setStartPeriod(event.target.value)}
+              className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-2.5 py-2 text-sm"
+              required
+            />
+          </label>
+          <label className="text-xs font-semibold text-slate-700">
+            Đến tiết
+            <input
+              type="number"
+              min="1"
+              max="13"
+              value={endPeriod}
+              onChange={(event) => setEndPeriod(event.target.value)}
+              className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-2.5 py-2 text-sm"
+              required
+            />
+          </label>
+          <button
+            type="submit"
+            className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-bold text-white hover:bg-emerald-700 sm:col-span-2 lg:col-span-5"
+          >
+            Lưu dữ liệu và cho phép xếp phòng
+          </button>
+        </form>
+      )}
 
       {alts !== null && (
         <ModalPortal>

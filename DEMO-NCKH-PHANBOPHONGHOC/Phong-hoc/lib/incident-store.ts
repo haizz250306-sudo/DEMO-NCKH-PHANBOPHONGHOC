@@ -24,12 +24,13 @@ export type EquipmentIncident = {
   reportedAt: string
   reportedBy: string
   status: IncidentStatus
+  maintenanceCompletedAt?: string
   maintenanceInvoice?: MaintenanceInvoice
   photoDataUrl?: string
   isDemo?: boolean
 }
 
-export const INCIDENTS_STORAGE_KEY = "apag-equipment-incidents-v1"
+export const INCIDENTS_STORAGE_KEY = "apag-equipment-incidents-v2"
 export const INCIDENTS_UPDATED_EVENT = "apag-equipment-incidents-updated"
 
 function isIncident(value: unknown): value is EquipmentIncident {
@@ -69,4 +70,12 @@ export function saveIncidents(incidents: EquipmentIncident[]): void {
   if (typeof window === "undefined") return
   window.localStorage.setItem(INCIDENTS_STORAGE_KEY, JSON.stringify(incidents))
   window.dispatchEvent(new Event(INCIDENTS_UPDATED_EVENT))
+}
+
+export function deleteIncident(id: string): void {
+  saveIncidents(loadIncidents().filter((incident) => incident.id !== id))
+}
+
+export function clearIncidents(): void {
+  saveIncidents([])
 }

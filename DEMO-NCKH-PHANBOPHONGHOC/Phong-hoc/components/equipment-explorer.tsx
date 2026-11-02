@@ -7,7 +7,6 @@ import {
   ChevronRight,
   Circle,
   DoorOpen,
-  Download,
   FileText,
   Layers3,
   Pencil,
@@ -21,12 +20,16 @@ import {
   X,
 } from "lucide-react"
 import { localEquipmentControlService } from "@/lib/equipment-service"
-import { INCIDENTS_UPDATED_EVENT, loadIncidents, saveIncidents, type EquipmentIncident, type IncidentStatus, type MaintenanceInvoice } from "@/lib/incident-store"
+import { INCIDENTS_UPDATED_EVENT, deleteIncident, loadIncidents, saveIncidents, type EquipmentIncident, type IncidentStatus, type MaintenanceInvoice } from "@/lib/incident-store"
 import {
   EQUIPMENT_UPDATED_EVENT,
+  loadEquipmentHistory,
+  recordResolvedIncidentHistory,
+  deleteEquipmentHistoryEntry,
   loadEquipment,
   saveEquipment,
   getRoomKey,
+  type EquipmentHistoryEntry,
   type EquipmentItem,
   type EquipmentStatus,
 } from "@/lib/equipment-store"
@@ -104,6 +107,11 @@ function formatCurrency(value: number): string {
     currency: "VND",
     maximumFractionDigits: 0,
   }).format(value)
+}
+
+function formatAssetCode(assetCode?: string): string {
+  if (!assetCode) return "Chưa cấp mã"
+  return assetCode.replace(/^TB-/i, "Thiết bị - ")
 }
 
 function escapeHtml(value: string): string {
@@ -204,15 +212,24 @@ export function EquipmentExplorer() {
   const [draft, setDraft] = useState<EquipmentDraft>(EMPTY_DRAFT)
   const [incidents, setIncidents] = useState<EquipmentIncident[]>([])
   const [showIncidentQueue, setShowIncidentQueue] = useState(false)
+  const [showHistory, setShowHistory] = useState(false)
+  const [equipmentHistory, setEquipmentHistory] = useState<EquipmentHistoryEntry[]>([])
   const [maintenanceIncident, setMaintenanceIncident] = useState<EquipmentIncident | null>(null)
   const [maintenanceDraft, setMaintenanceDraft] = useState<MaintenanceDraft>(EMPTY_MAINTENANCE_DRAFT)
   const [showInvoicePreview, setShowInvoicePreview] = useState(false)
   const [maintenanceMessage, setMaintenanceMessage] = useState("")
+  const [maintenanceSuccessMessage, setMaintenanceSuccessMessage] = useState("")
+  const [historyInvoice, setHistoryInvoice] = useState<EquipmentHistoryEntry | null>(null)
+  const [incidentPhoto, setIncidentPhoto] = useState<{
+    url: string
+    title: string
+  } | null>(null)
 
   useEffect(() => {
     const refresh = () => {
       setItems(loadEquipment())
       setIncidents(loadIncidents())
+      setEquipmentHistory(loadEquipmentHistory())
       setIsLoaded(true)
     }
     refresh()
@@ -321,14 +338,28 @@ export function EquipmentExplorer() {
   }
 
   function updateIncidentStatus(id: string, status: IncidentStatus) {
-    const nextIncidents = incidents.map((incident) => incident.id === id ? { ...incident, status } : incident)
+    const incident = incidents.find((entry) => entry.id === id)
+    if (!incident) return
+    const updatedIncident = {
+      ...incident,
+      status,
+      ...(status === "resolved"
+        ? { maintenanceCompletedAt: new Date().toISOString() }
+        : {}),
+    }
+    const nextIncidents = incidents.map((entry) =>
+      entry.id === id ? updatedIncident : entry,
+    )
     saveIncidents(nextIncidents)
     setIncidents(nextIncidents)
-    const incident = incidents.find((entry) => entry.id === id)
-    if (status === "resolved" && incident?.equipmentId) {
+    if ((status === "resolved" || status === "in_progress") && incident.equipmentId) {
       const nextItems = items.map((item) =>
-        item.id === incident.equipmentId && item.status === "maintenance"
-          ? { ...item, status: "active" as const, updatedAt: new Date().toISOString() }
+        item.id === incident.equipmentId
+          ? {
+              ...item,
+              status: (status === "resolved" ? "active" : "maintenance") as EquipmentStatus,
+              updatedAt: new Date().toISOString(),
+            }
           : item,
       )
       if (nextItems.some((item, index) => item !== items[index])) {
@@ -336,6 +367,22 @@ export function EquipmentExplorer() {
         setItems(nextItems)
       }
     }
+    if (status === "resolved" && incident.status !== "resolved") {
+      recordResolvedIncidentHistory(incident)
+      setEquipmentHistory(loadEquipmentHistory())
+    }
+  }
+
+  function removeIncident(incident: EquipmentIncident) {
+    if (!window.confirm(`Xóa báo cáo sự cố “${incident.equipmentName}” tại phòng ${incident.roomId}?`)) return
+    deleteIncident(incident.id)
+    setIncidents(loadIncidents())
+  }
+
+  function removeHistoryEntry(entry: EquipmentHistoryEntry) {
+    if (!window.confirm(`Xóa lịch sử xử lý “${entry.equipmentName}” tại phòng ${entry.roomId ?? "không rõ"}?`)) return
+    deleteEquipmentHistoryEntry(entry.id)
+    setEquipmentHistory(loadEquipmentHistory())
   }
 
   function openMaintenanceForm(incident: EquipmentIncident) {
@@ -376,7 +423,8 @@ export function EquipmentExplorer() {
 
     const updatedIncident: EquipmentIncident = {
       ...maintenanceIncident,
-      status: "in_progress",
+      status: "resolved",
+      maintenanceCompletedAt: new Date().toISOString(),
       maintenanceInvoice: invoice,
     }
     const nextIncidents = incidents.map((incident) =>
@@ -384,12 +432,12 @@ export function EquipmentExplorer() {
     )
     saveIncidents(nextIncidents)
     setIncidents(nextIncidents)
-    setMaintenanceIncident(updatedIncident)
+    setMaintenanceIncident(null)
 
     if (updatedIncident.equipmentId) {
       const nextItems = items.map((item) =>
         item.id === updatedIncident.equipmentId
-          ? { ...item, status: "maintenance" as const, updatedAt: new Date().toISOString() }
+          ? { ...item, status: "active" as const, updatedAt: new Date().toISOString() }
           : item,
       )
       if (nextItems.some((item, index) => item !== items[index])) {
@@ -397,20 +445,16 @@ export function EquipmentExplorer() {
         setItems(nextItems)
       }
     }
-    setMaintenanceMessage("Đã lưu phiếu bảo trì; trạng thái sự cố được chuyển sang đang xử lý.")
-    setShowInvoicePreview(true)
-  }
-
-  function downloadInvoice(incident: EquipmentIncident, invoice: MaintenanceInvoice) {
-    const blob = new Blob([invoiceHtml(incident, invoice)], { type: "text/html;charset=utf-8" })
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement("a")
-    link.href = url
-    link.download = `${invoice.invoiceNumber.replace(/[^a-zA-Z0-9-_]/g, "_")}.html`
-    document.body.append(link)
-    link.click()
-    link.remove()
-    URL.revokeObjectURL(url)
+    recordResolvedIncidentHistory({
+      ...updatedIncident,
+      equipmentCode: maintenanceIncident.equipmentCode,
+    })
+    setEquipmentHistory(loadEquipmentHistory())
+    setMaintenanceSuccessMessage(
+      `Đã xử lý thành công sự cố ${updatedIncident.equipmentName}. Hóa đơn và thông tin bảo trì đã được cập nhật vào lịch sử.`,
+    )
+    setMaintenanceMessage("")
+    setShowInvoicePreview(false)
   }
 
   function printInvoice(incident: EquipmentIncident, invoice: MaintenanceInvoice) {
@@ -558,11 +602,82 @@ export function EquipmentExplorer() {
   const unassignedCount = unassignedItems.reduce((sum, item) => sum + item.quantity, 0)
   return (
     <div className="space-y-4">
-      <div className="flex gap-2 border-b border-slate-200" role="tablist" aria-label="Quản lý thiết bị và báo cáo sự cố">
-        <button type="button" role="tab" aria-selected={!showIncidentQueue} onClick={() => setShowIncidentQueue(false)} className={`border-b-2 px-3 py-2 text-sm font-semibold ${showIncidentQueue ? "border-transparent text-slate-500 hover:text-slate-800" : "border-sky-700 text-sky-800"}`}>Thiết bị</button>
-        <button type="button" role="tab" aria-selected={showIncidentQueue} onClick={() => setShowIncidentQueue(true)} className={`inline-flex items-center gap-2 border-b-2 px-3 py-2 text-sm font-semibold ${showIncidentQueue ? "border-sky-700 text-sky-800" : "border-transparent text-slate-500 hover:text-slate-800"}`}>Sự cố{incidents.some((incident) => incident.status !== "resolved") && <span className="rounded-full bg-red-100 px-1.5 py-0.5 text-xs text-red-700">{incidents.filter((incident) => incident.status !== "resolved").length}</span>}</button>
+      {incidentPhoto && (
+        <div
+          className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-950/55 p-4"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setIncidentPhoto(null)
+          }}
+        >
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-label={`Ảnh sự cố ${incidentPhoto.title}`}
+            className="relative w-full max-w-2xl rounded-2xl bg-white p-4 shadow-2xl"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <h2 className="text-sm font-bold text-slate-900">
+                Ảnh sự cố: {incidentPhoto.title}
+              </h2>
+              <button
+                type="button"
+                aria-label="Đóng ảnh sự cố"
+                onClick={() => setIncidentPhoto(null)}
+                className="rounded-lg p-1 text-slate-500 hover:bg-slate-100"
+              >
+                <X className="size-5" />
+              </button>
+            </div>
+            <img
+              src={incidentPhoto.url}
+              alt={`Ảnh sự cố ${incidentPhoto.title}`}
+              className="max-h-[70vh] w-full rounded-xl border border-slate-200 bg-slate-50 object-contain"
+            />
+          </section>
+        </div>
+      )}
+      {maintenanceSuccessMessage && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/35 p-4"
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) setMaintenanceSuccessMessage("")
+          }}
+        >
+          <section
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="maintenance-success-title"
+            className="w-full max-w-md rounded-2xl border border-emerald-200 bg-white p-5 shadow-2xl"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2 id="maintenance-success-title" className="text-base font-bold text-emerald-900">
+                  Xử lý thành công
+                </h2>
+                <p className="mt-2 text-sm leading-6 text-slate-600">{maintenanceSuccessMessage}</p>
+              </div>
+              <button type="button" aria-label="Đóng thông báo" onClick={() => setMaintenanceSuccessMessage("")} className="rounded-lg p-1 text-slate-400 hover:bg-slate-100">
+                <X className="size-5" />
+              </button>
+            </div>
+            <div className="mt-5 flex justify-end">
+              <button type="button" onClick={() => setMaintenanceSuccessMessage("")} className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-bold text-white hover:bg-emerald-700">
+                OK
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+      <div className="flex gap-2 border-b border-slate-200" role="tablist" aria-label="Quản lý thiết bị, sự cố và lịch sử">
+        <button type="button" role="tab" aria-selected={!showIncidentQueue && !showHistory} onClick={() => { setShowIncidentQueue(false); setShowHistory(false) }} className={`border-b-2 px-3 py-2 text-sm font-semibold ${showIncidentQueue || showHistory ? "border-transparent text-slate-500 hover:text-slate-800" : "border-sky-700 text-sky-800"}`}>Thiết bị</button>
+        <button type="button" role="tab" aria-selected={showIncidentQueue} onClick={() => { setShowIncidentQueue(true); setShowHistory(false) }} className={`inline-flex items-center gap-2 border-b-2 px-3 py-2 text-sm font-semibold ${showIncidentQueue ? "border-sky-700 text-sky-800" : "border-transparent text-slate-500 hover:text-slate-800"}`}>Sự cố{incidents.some((incident) => incident.status !== "resolved") && <span className="rounded-full bg-red-100 px-1.5 py-0.5 text-xs text-red-700">{incidents.filter((incident) => incident.status !== "resolved").length}</span>}</button>
+        <button type="button" role="tab" aria-selected={showHistory} onClick={() => setShowHistory(true)} className={`border-b-2 px-3 py-2 text-sm font-semibold ${showHistory ? "border-sky-700 text-sky-800" : "border-transparent text-slate-500 hover:text-slate-800"}`}>Lịch sử cập nhật</button>
       </div>
-      {showIncidentQueue ? <IncidentQueue incidents={incidents} onStatusChange={updateIncidentStatus} onMaintenance={openMaintenanceForm} /> : <>
+      {showHistory ? <EquipmentHistoryList entries={equipmentHistory} onDelete={removeHistoryEntry} onViewInvoice={setHistoryInvoice} /> : showIncidentQueue ? <IncidentQueue incidents={incidents} onStatusChange={updateIncidentStatus} onMaintenance={openMaintenanceForm} onDelete={removeIncident} onViewPhoto={(url, title) => setIncidentPhoto({ url, title })} /> : <>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <nav aria-label="Đường dẫn quản lý thiết bị" className="flex min-w-0 flex-wrap items-center gap-y-1 text-sm">
           {breadcrumbs.map((crumb, index) => <span key={`${crumb.level}-${crumb.label}`} className="inline-flex min-w-0 items-center"><button type="button" disabled={index === breadcrumbs.length - 1} onClick={() => goTo(crumb.level)} className={`max-w-52 truncate ${index === breadcrumbs.length - 1 ? "font-semibold text-slate-900" : "text-slate-500 hover:text-sky-700"}`}>{crumb.label}</button>{index < breadcrumbs.length - 1 && <ChevronRight className="mx-1 size-4 shrink-0 text-slate-400" />}</span>)}
@@ -583,13 +698,117 @@ export function EquipmentExplorer() {
             onSubmit={saveMaintenance}
             onClose={() => setMaintenanceIncident(null)}
             onPreview={() => setShowInvoicePreview((current) => !current)}
+            onViewPhoto={(url, title) => setIncidentPhoto({ url, title })}
             showPreview={showInvoicePreview}
             message={maintenanceMessage}
-            onDownload={() => downloadInvoice(maintenanceIncident, invoiceFromDraft(maintenanceDraft))}
             onPrint={() => printInvoice(maintenanceIncident, invoiceFromDraft(maintenanceDraft))}
           />
         )}
+        {historyInvoice && <HistoryInvoiceModal entry={historyInvoice} onClose={() => setHistoryInvoice(null)} />}
     </div>
+  )
+}
+
+function HistoryInvoiceModal({ entry, onClose }: { entry: EquipmentHistoryEntry; onClose: () => void }) {
+  const invoice = entry.maintenanceInvoice
+  if (!invoice) return null
+  const total = invoice.quantity * invoice.unitPrice + invoice.laborCost
+
+  return (
+    <div
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/45 p-4"
+      role="presentation"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose()
+      }}
+    >
+      <section
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="history-invoice-title"
+        className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl bg-white p-5 shadow-2xl"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h2 id="history-invoice-title" className="text-lg font-bold text-slate-900">Hóa đơn / phiếu bảo trì</h2>
+            <p className="mt-1 text-sm text-slate-500">{entry.equipmentName} · Mã {invoice.invoiceNumber}</p>
+          </div>
+          <button type="button" aria-label="Đóng hóa đơn" onClick={onClose} className="rounded-lg p-1 text-slate-500 hover:bg-slate-100">
+            <X className="size-5" />
+          </button>
+        </div>
+        <div className="mt-5 grid gap-2 text-sm sm:grid-cols-2">
+          <p><strong>Ngày bảo trì:</strong> {invoice.maintenanceDate}</p>
+          <p><strong>Phòng:</strong> {entry.roomId ?? "—"}</p>
+          <p><strong>Đơn vị:</strong> {invoice.vendor}</p>
+          <p><strong>Người báo cáo:</strong> {entry.reportedBy ?? "—"}</p>
+        </div>
+        <div className="mt-5 overflow-x-auto">
+          <table className="w-full min-w-[480px] border-collapse text-sm">
+            <thead><tr className="bg-slate-100"><th className="border border-slate-300 p-2 text-left">Nội dung</th><th className="border border-slate-300 p-2 text-right">SL</th><th className="border border-slate-300 p-2 text-right">Đơn giá</th><th className="border border-slate-300 p-2 text-right">Thành tiền</th></tr></thead>
+            <tbody>
+              <tr><td className="border border-slate-300 p-2">{invoice.description}</td><td className="border border-slate-300 p-2 text-right">{invoice.quantity}</td><td className="border border-slate-300 p-2 text-right">{formatCurrency(invoice.unitPrice)}</td><td className="border border-slate-300 p-2 text-right">{formatCurrency(invoice.quantity * invoice.unitPrice)}</td></tr>
+              <tr><td colSpan={3} className="border border-slate-300 p-2">Công bảo trì</td><td className="border border-slate-300 p-2 text-right">{formatCurrency(invoice.laborCost)}</td></tr>
+            </tbody>
+          </table>
+        </div>
+        {invoice.notes && <p className="mt-3 text-sm"><strong>Ghi chú:</strong> {invoice.notes}</p>}
+        <p className="mt-4 text-right text-lg font-bold">Tổng cộng: {formatCurrency(total)}</p>
+      </section>
+    </div>
+  )
+}
+
+function EquipmentHistoryList({ entries, onDelete, onViewInvoice }: { entries: EquipmentHistoryEntry[]; onDelete: (entry: EquipmentHistoryEntry) => void; onViewInvoice: (entry: EquipmentHistoryEntry) => void }) {
+  const actionLabels = {
+    "incident-resolved": "Đã xử lý sự cố hoàn tất",
+  } as const
+
+  return (
+    <section className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+      <div className="border-b border-slate-200 p-4">
+        <h2 className="font-bold text-slate-900">Lịch sử thay đổi thiết bị</h2>
+        <p className="mt-1 text-sm text-slate-500">
+          Chỉ lưu các lần xử lý sự cố thiết bị đã hoàn tất. Khi thiết bị cần bảo trì lại, một lần xử lý mới sẽ được ghi riêng.
+        </p>
+      </div>
+      {entries.length === 0 ? (
+        <p className="p-8 text-center text-sm text-slate-500">Chưa có lịch sử cập nhật.</p>
+      ) : (
+        <ul className="divide-y divide-slate-100">
+          {entries.map((entry) => (
+            <li key={entry.id} className="flex flex-col gap-1 border-l-4 border-emerald-500 bg-emerald-50/70 p-4 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <p className="font-semibold text-slate-800">
+                  {entry.equipmentName}
+                  {entry.assetCode ? ` · ${formatAssetCode(entry.assetCode)}` : ""}
+                </p>
+                <p className="mt-1 text-sm text-slate-600">
+                  {actionLabels[entry.action]} · {entry.changedFields.join(", ")}
+                </p>
+                {entry.maintenanceInvoice && (
+                  <button type="button" onClick={() => onViewInvoice(entry)} className="mt-1 inline-flex items-center gap-1 text-xs font-semibold text-emerald-800 hover:underline">
+                    <FileText className="size-3.5" /> Xem hóa đơn
+                  </button>
+                )}
+                {entry.roomId && (
+                  <p className="text-xs text-slate-500">
+                    Phòng {entry.roomId} · {entry.issueType ?? "Sự cố thiết bị"} · Người báo cáo: {entry.reportedBy ?? "—"}
+                  </p>
+                )}
+              </div>
+              <div className="flex shrink-0 items-start gap-3">
+                <time className="text-xs text-slate-500">{new Date(entry.timestamp).toLocaleString("vi-VN")}</time>
+                <button type="button" aria-label={`Xóa lịch sử ${entry.equipmentName}`} onClick={() => onDelete(entry)} className="rounded-lg p-1 text-slate-400 hover:bg-red-50 hover:text-red-700">
+                  <Trash2 className="size-4" />
+                </button>
+              </div>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
   )
 }
 
@@ -597,10 +816,14 @@ function IncidentQueue({
   incidents,
   onStatusChange,
   onMaintenance,
+  onDelete,
+  onViewPhoto,
 }: {
   incidents: EquipmentIncident[]
   onStatusChange: (id: string, status: IncidentStatus) => void
   onMaintenance: (incident: EquipmentIncident) => void
+  onDelete: (incident: EquipmentIncident) => void
+  onViewPhoto: (url: string, title: string) => void
 }) {
   const severityLabels = { critical: "Nghiêm trọng", medium: "Trung bình", low: "Thấp" }
   const statusLabels = { pending: "Chưa xử lý", in_progress: "Đang xử lý", resolved: "Đã xử lý" }
@@ -621,6 +844,20 @@ function IncidentQueue({
                   <p className="font-semibold text-slate-800">{incident.equipmentName} · Phòng {incident.roomId}</p>
                   <p className="mt-1 text-sm text-slate-600">{incident.issueType} · {incident.description}</p>
                   <p className="mt-1 text-xs text-slate-400">{incident.reportedBy} · {new Date(incident.reportedAt).toLocaleString("vi-VN")}</p>
+                  {incident.photoDataUrl && (
+                    <button
+                      type="button"
+                      onClick={() => onViewPhoto(incident.photoDataUrl!, incident.equipmentName)}
+                      className="mt-2 inline-flex items-center gap-2 rounded-lg border border-sky-200 bg-sky-50 p-1.5 text-xs font-semibold text-sky-800 hover:bg-sky-100"
+                    >
+                      <img
+                        src={incident.photoDataUrl}
+                        alt={`Ảnh sự cố ${incident.equipmentName}`}
+                        className="size-14 rounded object-cover"
+                      />
+                      Xem ảnh sự cố
+                    </button>
+                  )}
                   {incident.maintenanceInvoice && (
                     <p className="mt-1 inline-flex items-center gap-1 text-xs font-medium text-sky-800">
                       <FileText className="size-3.5" />
@@ -647,7 +884,16 @@ function IncidentQueue({
                     className="inline-flex items-center gap-1.5 rounded-lg border border-sky-200 px-3 py-2 text-sm font-semibold text-sky-800 hover:bg-sky-50"
                   >
                     <Wrench className="size-4" />
-                    {incident.maintenanceInvoice ? "Cập nhật phiếu" : "Bảo trì / hóa đơn"}
+                    {incident.status === "in_progress" &&
+                    incident.maintenanceCompletedAt
+                      ? "Bảo trì lại"
+                      : incident.maintenanceInvoice
+                        ? "Cập nhật phiếu"
+                        : "Bảo trì / hóa đơn"}
+                  </button>
+                  <button type="button" aria-label={`Xóa báo cáo ${incident.equipmentName}`} onClick={() => onDelete(incident)} className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 px-3 py-2 text-sm font-semibold text-red-700 hover:bg-red-50">
+                    <Trash2 className="size-4" />
+                    Xóa
                   </button>
                 </div>
               </li>
@@ -675,7 +921,7 @@ function EquipmentRows({ items, onEdit, onRemove, onToggle }: { items: Equipment
     <div>
       <div className="hidden grid-cols-[minmax(230px,1.5fr)_minmax(120px,0.9fr)_minmax(150px,1fr)_90px_140px_96px] gap-x-6 bg-slate-50 px-6 py-3 text-xs font-bold uppercase text-slate-500 md:grid"><span>Thiết bị / mã</span><span>Loại</span><span>Trạng thái</span><span className="text-center">Số lượng</span><span className="text-center">Điều khiển</span><span className="sr-only">Thao tác</span></div>
       <ul className="divide-y divide-slate-100">{items.map((item) => <li key={item.id} className="grid gap-x-6 gap-y-3 px-4 py-4 md:grid-cols-[minmax(230px,1.5fr)_minmax(120px,0.9fr)_minmax(150px,1fr)_90px_140px_96px] md:items-center md:px-6">
-        <div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><p className="font-semibold text-slate-800">{item.name}</p>{item.isDemo && <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-500">Demo</span>}</div><p className="mt-1 break-all text-xs font-medium leading-5 text-sky-700">Mã: {item.assetCode ?? "Chưa cấp mã"}</p>{item.notes && <p className="mt-1 truncate text-xs text-slate-500">{item.notes}</p>}</div>
+        <div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><p className="font-semibold text-slate-800">{item.name}</p>{item.isDemo && <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-500">Demo</span>}</div><p className="mt-1 break-all text-xs font-medium leading-5 text-sky-700">Mã: {formatAssetCode(item.assetCode)}</p>{item.notes && <p className="mt-1 truncate text-xs text-slate-500">{item.notes}</p>}</div>
         <p className="text-sm text-slate-600"><span className="mr-2 text-xs text-slate-400 md:hidden">Loại</span>{item.category}</p>
         <StatusBadge status={item.status} />
         <p className="text-center text-sm font-semibold tabular-nums text-slate-700"><span className="mr-2 text-xs font-normal text-slate-400 md:hidden">Số lượng</span>{item.quantity}</p>
@@ -729,8 +975,8 @@ function MaintenanceInvoiceModal({
   onPreview,
   showPreview,
   message,
-  onDownload,
   onPrint,
+  onViewPhoto,
 }: {
   incident: EquipmentIncident
   draft: MaintenanceDraft
@@ -740,8 +986,8 @@ function MaintenanceInvoiceModal({
   onPreview: () => void
   showPreview: boolean
   message: string
-  onDownload: () => void
   onPrint: () => void
+  onViewPhoto: (url: string, title: string) => void
 }) {
   const invoice = invoiceFromDraft(draft)
   const invoiceTotal = invoice.quantity * invoice.unitPrice + invoice.laborCost
@@ -761,6 +1007,20 @@ function MaintenanceInvoiceModal({
           <div>
             <h2 id="maintenance-title" className="text-lg font-bold text-slate-900">Cập nhật bảo trì và hóa đơn</h2>
             <p className="mt-1 text-sm text-slate-500">{incident.equipmentName} · Phòng {incident.roomId}</p>
+            {incident.photoDataUrl && (
+              <button
+                type="button"
+                onClick={() => onViewPhoto(incident.photoDataUrl!, incident.equipmentName)}
+                className="mt-2 inline-flex items-center gap-2 text-xs font-semibold text-sky-700 hover:underline"
+              >
+                <img
+                  src={incident.photoDataUrl}
+                  alt={`Ảnh sự cố ${incident.equipmentName}`}
+                  className="size-12 rounded border border-sky-200 object-cover"
+                />
+                Xem ảnh giảng viên gửi
+              </button>
+            )}
           </div>
           <button type="button" aria-label="Đóng phiếu bảo trì" onClick={onClose} className="flex size-9 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100"><X className="size-4" /></button>
         </header>
@@ -821,7 +1081,6 @@ function MaintenanceInvoiceModal({
           <div className="flex flex-wrap justify-end gap-2 border-t border-slate-100 pt-4">
             {showPreview && (
               <>
-                <button type="button" disabled={!canExport} onClick={onDownload} className="inline-flex items-center gap-2 rounded-lg border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50"><Download className="size-4" />Tải file hóa đơn HTML</button>
                 <button type="button" disabled={!canExport} onClick={onPrint} className="inline-flex items-center gap-2 rounded-lg border border-sky-300 px-3 py-2 text-sm font-semibold text-sky-800 hover:bg-sky-50 disabled:opacity-50"><Printer className="size-4" />In / Lưu PDF</button>
               </>
             )}

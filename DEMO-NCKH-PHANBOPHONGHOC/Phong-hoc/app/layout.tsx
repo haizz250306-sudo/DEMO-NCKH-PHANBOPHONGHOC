@@ -62,7 +62,7 @@ export default function RootLayout({
   children: React.ReactNode
 }>) {
   return (
-    <html lang="vi" translate="no" className="notranslate bg-background">
+    <html lang="vi" translate="no" className="notranslate light bg-background">
       <body className={`${beVietnamPro.className} antialiased`}>
         {children}
         {process.env.NODE_ENV === 'production' && <Analytics />}

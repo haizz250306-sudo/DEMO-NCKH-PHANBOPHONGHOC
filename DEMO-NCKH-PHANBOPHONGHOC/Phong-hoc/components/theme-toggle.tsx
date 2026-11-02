@@ -20,9 +20,7 @@ export function ThemeToggle() {
     const initialTheme: Theme =
       savedTheme === "dark" || savedTheme === "light"
         ? savedTheme
-        : window.matchMedia("(prefers-color-scheme: dark)").matches
-          ? "dark"
-          : "light"
+        : "light"
 
     setTheme(initialTheme)
     applyTheme(initialTheme)

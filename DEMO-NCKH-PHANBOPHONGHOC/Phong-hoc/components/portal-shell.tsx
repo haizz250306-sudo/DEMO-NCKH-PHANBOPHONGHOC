@@ -35,6 +35,18 @@ import { INCIDENTS_UPDATED_EVENT, loadIncidents } from "@/lib/incident-store";
 import { SHEET_CLASSES, SHEET_ROOMS } from "@/lib/schedule-data";
 import { autoSchedule } from "@/lib/scheduling";
 import { SignOutButton } from "@/components/sign-out-button";
+import {
+  ALLOCATION_UPDATED_EVENT,
+  listAllocationHistory,
+} from "@/lib/allocation-store";
+import {
+  BORROW_REQUESTS_UPDATED_EVENT,
+  loadBorrowRequests,
+} from "@/lib/borrow-store";
+import {
+  EQUIPMENT_UPDATED_EVENT,
+  loadEquipmentHistory,
+} from "@/lib/equipment-store";
 
 type AdminPanel =
   | "home"
@@ -82,6 +94,7 @@ export function PortalShell({
   const [openIncidentCount, setOpenIncidentCount] = useState(0);
   const [now, setNow] = useState<Date | null>(null);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [notificationVersion, setNotificationVersion] = useState(0);
 
   function selectAdminPanel(panel: AdminPanel) {
     setActivePanel(panel);
@@ -102,6 +115,27 @@ export function PortalShell({
     setNow(new Date());
     const intervalId = window.setInterval(() => setNow(new Date()), 1000);
     return () => window.clearInterval(intervalId);
+  }, [isAdmin]);
+
+  useEffect(() => {
+    if (!isAdmin) return;
+    const refreshNotifications = () =>
+      setNotificationVersion((version) => version + 1);
+    const events = [
+      ALLOCATION_UPDATED_EVENT,
+      BORROW_REQUESTS_UPDATED_EVENT,
+      EQUIPMENT_UPDATED_EVENT,
+      INCIDENTS_UPDATED_EVENT,
+      "storage",
+    ];
+    events.forEach((event) => window.addEventListener(event, refreshNotifications));
+    const intervalId = window.setInterval(refreshNotifications, 30000);
+    return () => {
+      events.forEach((event) =>
+        window.removeEventListener(event, refreshNotifications),
+      );
+      window.clearInterval(intervalId);
+    };
   }, [isAdmin]);
 
   useEffect(() => {
@@ -246,35 +280,60 @@ export function PortalShell({
       },
     ] as const;
 
+    void notificationVersion;
+    const relativeTime = (value: string | undefined) => {
+      if (!value || !now) return "Vừa cập nhật";
+      const minutes = Math.max(
+        0,
+        Math.floor((now.getTime() - new Date(value).getTime()) / 60000),
+      );
+      if (minutes < 1) return "Vừa cập nhật";
+      if (minutes < 60) return `${minutes} phút trước`;
+      const hours = Math.floor(minutes / 60);
+      if (hours < 24) return `${hours} giờ trước`;
+      return `${Math.floor(hours / 24)} ngày trước`;
+    };
+    const latestAllocation = listAllocationHistory()[0];
+    const pendingBorrowRequests = loadBorrowRequests().filter(
+      (request) => request.status === "pending",
+    ).length;
+    const unresolvedIncidents = loadIncidents().filter(
+      (incident) => incident.status !== "resolved",
+    ).length;
+    const latestEquipment = loadEquipmentHistory()[0];
     const notifications = [
-      {
-        text: "Đã có lịch phân bổ phòng học kỳ I năm 2026",
-        time: "2 giờ trước",
+      latestAllocation && {
+        text: `Cập nhật phân bổ phòng học kỳ ${latestAllocation.semesterKey}`,
+        time: relativeTime(latestAllocation.savedAt),
         type: "dot-blue",
       },
-      {
-        text: "Yêu cầu mượn phòng số 12 đã được duyệt",
-        time: "4 giờ trước",
+      pendingBorrowRequests > 0 && {
+        text: `${pendingBorrowRequests} yêu cầu mượn phòng đang chờ xử lý`,
+        time: "Hiện tại",
         type: "dot-green",
       },
-      {
-        text: "Cập nhật danh sách phòng học mới",
-        time: "1 ngày trước",
+      unresolvedIncidents > 0 && {
+        text: `${unresolvedIncidents} sự cố thiết bị chưa được xử lý`,
+        time: "Hiện tại",
         type: "dot-orange",
       },
-      {
-        text: "Báo trì thiết bị phòng học trừ 25/09",
-        time: "1 ngày trước",
+      latestEquipment && {
+        text: `Thiết bị được cập nhật: ${latestEquipment.equipmentName}`,
+        time: relativeTime(latestEquipment.timestamp),
         type: "dot-slate",
       },
-    ];
+    ].filter(Boolean) as {
+      text: string;
+      time: string;
+      type: string;
+    }[];
 
     const renderHome = () => (
       <div className="rounded-[28px] border border-slate-200 bg-[#f6fafb] p-6 shadow-[0_10px_30px_rgba(15,23,42,0.04)]">
         <div className="mb-8 flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
           <div>
             <h2 className="text-[2.2rem] font-bold tracking-tight text-slate-800">
-              Xin chào, Admin!
+              Quản trị hệ thống
             </h2>
             <p className="mt-3 max-w-[760px] text-[15px] leading-6 text-slate-500">
               Chào mừng bạn đến với hệ thống phân bổ phòng học học APAG. Cùng

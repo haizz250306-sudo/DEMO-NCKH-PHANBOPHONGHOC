@@ -9,6 +9,8 @@ import { SHEET_ROOMS, SHEET_CLASSES } from "@/lib/schedule-data"
 import { autoSchedule, DAY_LABELS, rangeTime, type ScheduleResult } from "@/lib/scheduling"
 
 type IncidentDraft = {
+  campus: string
+  building: string
   roomId: string
   equipmentId: string
   equipmentCode: string
@@ -35,7 +37,7 @@ const EQUIPMENT_STATUS_LABELS: Record<EquipmentStatus, string> = {
   broken: "Đang hỏng",
   offline: "Mất kết nối",
 }
-const EMPTY_DRAFT: IncidentDraft = { roomId: "", equipmentId: "", equipmentCode: "", equipmentName: "", issueType: ISSUE_TYPES[0], severity: "medium", description: "", reportedBy: "", photoDataUrl: "" }
+const EMPTY_DRAFT: IncidentDraft = { campus: "", building: "", roomId: "", equipmentId: "", equipmentCode: "", equipmentName: "", issueType: ISSUE_TYPES[0], severity: "medium", description: "", reportedBy: "", photoDataUrl: "" }
 const fieldClass = "mt-1 w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-800 outline-none transition focus:border-sky-400 focus:ring-2 focus:ring-sky-100"
 
 function currentScheduleDay(): number {
@@ -132,15 +134,35 @@ export function LecturerIncidentPanel() {
     : null
 
   function openReport(roomId = selectableRooms[0]?.id ?? "") {
-    setDraft({ ...EMPTY_DRAFT, roomId, reportedBy: "" })
+    const room = SHEET_ROOMS.find((entry) => entry.id === roomId)
+    const roomEquipment = equipment.filter((item) => item.roomId === roomId)
+    setDraft({
+      ...EMPTY_DRAFT,
+      campus: room?.campus ?? "",
+      building: room?.building ?? "",
+      roomId,
+      equipmentId: roomEquipment[0]?.id ?? "",
+      equipmentCode: roomEquipment[0]?.assetCode ?? "",
+      equipmentName: roomEquipment[0]?.name ?? "",
+      reportedBy: "",
+    })
     setImageError("")
     setSubmitMessage("")
     setIsReportOpen(true)
   }
 
   function updateRoom(roomId: string) {
+    const room = SHEET_ROOMS.find((entry) => entry.id === roomId)
     const roomEquipment = equipment.filter((item) => item.roomId === roomId)
-    setDraft((current) => ({ ...current, roomId, equipmentId: roomEquipment[0]?.id ?? "", equipmentCode: roomEquipment[0]?.assetCode ?? "", equipmentName: roomEquipment[0]?.name ?? "" }))
+    setDraft((current) => ({ ...current, campus: room?.campus ?? current.campus, building: room?.building ?? current.building, roomId, equipmentId: roomEquipment[0]?.id ?? "", equipmentCode: roomEquipment[0]?.assetCode ?? "", equipmentName: roomEquipment[0]?.name ?? "" }))
+  }
+
+  function updateLocation(campus: string, building: string, roomId: string) {
+    if (!roomId) {
+      setDraft((current) => ({ ...current, campus, building, roomId: "", equipmentId: "", equipmentCode: "", equipmentName: "" }))
+      return
+    }
+    updateRoom(roomId)
   }
 
   function updateEquipment(equipmentId: string) {
@@ -230,7 +252,7 @@ export function LecturerIncidentPanel() {
         {visibleIncidents.length === 0 ? <EmptyState title="Không có sự cố được ghi nhận" message="Các thiết bị tại phòng học hiện chưa có báo cáo sự cố." /> : <ul className="divide-y divide-slate-100">{visibleIncidents.map((incident) => <li key={incident.id}><button type="button" onClick={() => setSelectedIncident(incident)} className="grid w-full gap-3 px-4 py-4 text-left transition hover:bg-slate-50 md:grid-cols-[1.2fr_1fr_1fr_1fr] md:items-center sm:px-5"><div><p className="font-semibold text-slate-900">{incident.equipmentName} · {incident.roomId}</p><p className="mt-1 text-sm text-slate-500">{incident.issueType}</p></div><SeverityBadge severity={incident.severity} /><span className="text-sm text-slate-500">{formatDate(incident.reportedAt)}</span><IncidentStatusBadge status={incident.status} /></button></li>)}</ul>}
       </section>
 
-      {isReportOpen && <ReportDialog draft={draft} equipment={equipment} imageError={imageError} onDraftChange={setDraft} onRoomChange={updateRoom} onEquipmentChange={updateEquipment} onImageChange={handleImageChange} onImageClear={() => setDraft((current) => ({ ...current, photoDataUrl: "" }))} onSubmit={handleSubmit} onClose={() => setIsReportOpen(false)} />}
+      {isReportOpen && <ReportDialog draft={draft} equipment={equipment} imageError={imageError} onDraftChange={setDraft} onRoomChange={updateRoom} onLocationChange={updateLocation} onEquipmentChange={updateEquipment} onImageChange={handleImageChange} onImageClear={() => setDraft((current) => ({ ...current, photoDataUrl: "" }))} onSubmit={handleSubmit} onClose={() => setIsReportOpen(false)} />}
       {currentSelectedIncident && <IncidentDialog incident={currentSelectedIncident} onClose={() => setSelectedIncident(null)} />}
       {selectedRoom && <RoomDialog room={selectedRoom} equipment={selectedRoomEquipment} incidents={selectedRoomIncidents} onIncidentClick={setSelectedIncident} onClose={() => setSelectedRoomId(null)} />}
     </div>
@@ -271,7 +293,14 @@ function Detail({ label, value }: { label: string; value: string }) {
   return <div><p className="text-xs text-slate-500">{label}</p><p className="mt-1 text-sm font-medium text-slate-800">{value}</p></div>
 }
 
-function ReportDialog({ draft, equipment, imageError, onDraftChange, onRoomChange, onEquipmentChange, onImageChange, onImageClear, onSubmit, onClose }: { draft: IncidentDraft; equipment: EquipmentItem[]; imageError: string; onDraftChange: (draft: IncidentDraft) => void; onRoomChange: (roomId: string) => void; onEquipmentChange: (equipmentId: string) => void; onImageChange: (event: ChangeEvent<HTMLInputElement>) => void; onImageClear: () => void; onSubmit: (event: FormEvent<HTMLFormElement>) => void; onClose: () => void }) {
+function ReportDialog({ draft, equipment, imageError, onDraftChange, onRoomChange, onLocationChange, onEquipmentChange, onImageChange, onImageClear, onSubmit, onClose }: { draft: IncidentDraft; equipment: EquipmentItem[]; imageError: string; onDraftChange: (draft: IncidentDraft) => void; onRoomChange: (roomId: string) => void; onLocationChange: (campus: string, building: string, roomId: string) => void; onEquipmentChange: (equipmentId: string) => void; onImageChange: (event: ChangeEvent<HTMLInputElement>) => void; onImageClear: () => void; onSubmit: (event: FormEvent<HTMLFormElement>) => void; onClose: () => void }) {
   const roomEquipment = equipment.filter((item) => item.roomId === draft.roomId)
-  return <DialogFrame title="Báo cáo sự cố" onClose={onClose}><form onSubmit={onSubmit} className="space-y-4 p-5"><div className="grid gap-4 sm:grid-cols-2"><label className="text-sm font-medium text-slate-700">Phòng học *<select required value={draft.roomId} onChange={(event) => onRoomChange(event.target.value)} className={fieldClass}>{SHEET_ROOMS.map((room) => <option key={room.id} value={room.id}>{room.name} · {room.campus}</option>)}</select></label><label className="text-sm font-medium text-slate-700">Thiết bị<select value={draft.equipmentId} onChange={(event) => onEquipmentChange(event.target.value)} className={fieldClass}><option value="">Thiết bị khác / chưa có trong danh sách</option>{roomEquipment.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.assetCode ?? "Chưa có mã"} · {EQUIPMENT_STATUS_LABELS[item.status]}</option>)}</select></label><label className="text-sm font-medium text-slate-700">Loại sự cố<select value={draft.issueType} onChange={(event) => onDraftChange({ ...draft, issueType: event.target.value })} className={fieldClass}>{ISSUE_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}</select></label><label className="text-sm font-medium text-slate-700">Mức độ<select value={draft.severity} onChange={(event) => onDraftChange({ ...draft, severity: event.target.value as IncidentSeverity })} className={fieldClass}><option value="critical">Nghiêm trọng</option><option value="medium">Trung bình</option><option value="low">Thấp</option></select></label><label className="text-sm font-medium text-slate-700 sm:col-span-2">Người báo cáo *<input required value={draft.reportedBy} onChange={(event) => onDraftChange({ ...draft, reportedBy: event.target.value })} className={fieldClass} placeholder="Họ tên giảng viên" /></label></div><label className="block text-sm font-medium text-slate-700">Mô tả sự cố (không bắt buộc)<textarea rows={4} value={draft.description} onChange={(event) => onDraftChange({ ...draft, description: event.target.value })} className={`${fieldClass} resize-y`} placeholder="Có thể bổ sung biểu hiện và ảnh hưởng đến buổi học" /></label><div><label className="block text-sm font-medium text-slate-700">Ảnh minh họa (không bắt buộc)<span className="mt-1 flex w-fit cursor-pointer items-center gap-2 rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"><ImagePlus className="size-4" />Chọn ảnh<input type="file" accept="image/*" onChange={onImageChange} className="sr-only" /></span></label>{imageError && <p role="alert" className="mt-1 text-xs text-red-700">{imageError}</p>}{draft.photoDataUrl && <div className="mt-2 flex items-start gap-3"><img src={draft.photoDataUrl} alt="Ảnh đính kèm báo cáo" className="h-20 w-28 rounded-lg border border-slate-200 object-cover" /><button type="button" onClick={onImageClear} className="text-xs font-medium text-red-700 hover:underline">Gỡ ảnh</button></div>}</div><p className="rounded-lg bg-slate-50 p-3 text-xs leading-5 text-slate-600">Báo cáo được gửi đến hàng đợi sự cố của Phòng Đào tạo. Giảng viên không thể tự đổi trạng thái xử lý.</p><div className="flex justify-end gap-2 border-t border-slate-100 pt-4"><button type="button" onClick={onClose} className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">Hủy</button><button type="submit" className="rounded-lg bg-sky-700 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-800">Gửi báo cáo</button></div></form></DialogFrame>
+  const selectedRoom = SHEET_ROOMS.find((room) => room.id === draft.roomId)
+  const selectedCampus = draft.campus
+  const selectedBuilding = draft.building
+  const campuses = [...new Set(SHEET_ROOMS.map((room) => room.campus))]
+  const buildings = [...new Set(SHEET_ROOMS.filter((room) => room.campus === selectedCampus).map((room) => room.building))]
+  const rooms = SHEET_ROOMS.filter((room) => room.campus === selectedCampus && room.building === selectedBuilding)
+  const isOtherEquipment = draft.equipmentId === ""
+  return <DialogFrame title="Báo cáo sự cố" onClose={onClose}><form onSubmit={onSubmit} className="space-y-4 p-5"><div className="grid gap-4 sm:grid-cols-2"><label className="text-sm font-medium text-slate-700">Cơ sở *<select required value={selectedCampus} onChange={(event) => onLocationChange(event.target.value, "", "")} className={fieldClass}><option value="">Chọn cơ sở</option>{campuses.map((campus) => <option key={campus} value={campus}>{campus}</option>)}</select></label><label className="text-sm font-medium text-slate-700">Tòa *<select required disabled={!selectedCampus} value={selectedBuilding} onChange={(event) => onLocationChange(selectedCampus, event.target.value, "")} className={fieldClass}><option value="">Chọn tòa</option>{buildings.map((building) => <option key={building} value={building}>{building}</option>)}</select></label><label className="text-sm font-medium text-slate-700">Số phòng *<select required disabled={!selectedBuilding} value={draft.roomId} onChange={(event) => onRoomChange(event.target.value)} className={fieldClass}><option value="">Chọn phòng</option>{rooms.map((room) => <option key={room.id} value={room.id}>{room.name} · Sức chứa {room.capacity}</option>)}</select></label><label className="text-sm font-medium text-slate-700">Thiết bị<select value={draft.equipmentId} onChange={(event) => onEquipmentChange(event.target.value)} className={fieldClass}><option value="">Thiết bị khác / chưa có trong danh sách</option>{roomEquipment.map((item) => <option key={item.id} value={item.id}>{item.name} · {item.assetCode ?? "Chưa có mã"}</option>)}</select>{isOtherEquipment && <input value={draft.equipmentName} onChange={(event) => onDraftChange({ ...draft, equipmentName: event.target.value })} className={fieldClass} placeholder="Nhập tên thiết bị khác" required />}</label><label className="text-sm font-medium text-slate-700">Loại sự cố<select value={draft.issueType} onChange={(event) => onDraftChange({ ...draft, issueType: event.target.value })} className={fieldClass}>{ISSUE_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}</select></label><label className="text-sm font-medium text-slate-700">Mức độ<select value={draft.severity} onChange={(event) => onDraftChange({ ...draft, severity: event.target.value as IncidentSeverity })} className={fieldClass}><option value="critical">Nghiêm trọng</option><option value="medium">Trung bình</option><option value="low">Thấp</option></select></label><label className="text-sm font-medium text-slate-700 sm:col-span-2">Người báo cáo *<input required value={draft.reportedBy} onChange={(event) => onDraftChange({ ...draft, reportedBy: event.target.value })} className={fieldClass} placeholder="Họ tên giảng viên" /></label></div><label className="block text-sm font-medium text-slate-700">Mô tả sự cố (không bắt buộc)<textarea rows={4} value={draft.description} onChange={(event) => onDraftChange({ ...draft, description: event.target.value })} className={`${fieldClass} resize-y`} placeholder="Có thể bổ sung biểu hiện và ảnh hưởng đến buổi học" /></label><div><label className="block text-sm font-medium text-slate-700">Ảnh minh họa (không bắt buộc)<span className="mt-1 flex w-fit cursor-pointer items-center gap-2 rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"><ImagePlus className="size-4" />Chọn ảnh<input type="file" accept="image/*" onChange={onImageChange} className="sr-only" /></span></label>{imageError && <p role="alert" className="mt-1 text-xs text-red-700">{imageError}</p>}{draft.photoDataUrl && <div className="mt-2 flex items-start gap-3"><img src={draft.photoDataUrl} alt="Ảnh đính kèm báo cáo" className="h-20 w-28 rounded-lg border border-slate-200 object-cover" /><button type="button" onClick={onImageClear} className="text-xs font-medium text-red-700 hover:underline">Gỡ ảnh</button></div>}</div><p className="rounded-lg bg-slate-50 p-3 text-xs leading-5 text-slate-600">Báo cáo được gửi đến hàng đợi sự cố của Phòng Đào tạo. Giảng viên không thể tự đổi trạng thái xử lý.</p><div className="flex justify-end gap-2 border-t border-slate-100 pt-4"><button type="button" onClick={onClose} className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">Hủy</button><button type="submit" className="rounded-lg bg-sky-700 px-4 py-2 text-sm font-semibold text-white hover:bg-sky-800">Gửi báo cáo</button></div></form></DialogFrame>
 }

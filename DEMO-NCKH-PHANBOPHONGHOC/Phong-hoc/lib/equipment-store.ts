@@ -1,5 +1,6 @@
 import { SHEET_ROOMS } from "@/lib/schedule-data"
 import type { RoomInfo } from "@/lib/scheduling"
+import type { MaintenanceInvoice } from "@/lib/incident-store"
 
 export type EquipmentStatus = "active" | "off" | "maintenance" | "broken" | "offline"
 
@@ -21,6 +22,24 @@ export type EquipmentItem = {
 
 export const EQUIPMENT_STORAGE_KEY = "apag-equipment-v1"
 export const EQUIPMENT_UPDATED_EVENT = "apag-equipment-updated"
+export const EQUIPMENT_HISTORY_STORAGE_KEY = "apag-equipment-history-v2"
+
+export type EquipmentHistoryAction =
+  | "incident-resolved"
+
+export type EquipmentHistoryEntry = {
+  id: string
+  equipmentId: string
+  equipmentName: string
+  assetCode?: string
+  action: EquipmentHistoryAction
+  changedFields: string[]
+  timestamp: string
+  roomId?: string
+  issueType?: string
+  reportedBy?: string
+  maintenanceInvoice?: MaintenanceInvoice
+}
 
 const ROOM_EQUIPMENT = [
   { suffix: "air-conditioner", name: "Điều hòa", category: "Điều hòa", quantity: 2 },
@@ -199,5 +218,66 @@ export function saveEquipment(items: EquipmentItem[]): void {
   if (typeof window === "undefined") return
   const normalizedItems = withRoomEquipmentDefaults(splitIntoIndividualEquipment(items))
   window.localStorage.setItem(EQUIPMENT_STORAGE_KEY, JSON.stringify(normalizedItems))
+  window.dispatchEvent(new Event(EQUIPMENT_UPDATED_EVENT))
+}
+
+export function recordResolvedIncidentHistory(
+  incident: {
+    id: string
+    equipmentId: string
+    equipmentName: string
+    equipmentCode?: string
+    roomId?: string
+    issueType?: string
+    reportedBy?: string
+    maintenanceInvoice?: MaintenanceInvoice
+  },
+): void {
+  if (typeof window === "undefined") return
+  const entries = loadEquipmentHistory()
+  const entry: EquipmentHistoryEntry = {
+    id: `equipment-history-${Date.now()}`,
+    equipmentId: incident.equipmentId,
+    equipmentName: incident.equipmentName,
+    assetCode: incident.equipmentCode,
+    action: "incident-resolved",
+    changedFields: ["Đã xử lý sự cố hoàn tất"],
+    timestamp: new Date().toISOString(),
+    roomId: incident.roomId,
+    issueType: incident.issueType,
+    reportedBy: incident.reportedBy,
+    maintenanceInvoice: incident.maintenanceInvoice,
+  }
+  window.localStorage.setItem(
+    EQUIPMENT_HISTORY_STORAGE_KEY,
+    JSON.stringify([entry, ...entries].slice(0, 500)),
+  )
+}
+
+export function loadEquipmentHistory(): EquipmentHistoryEntry[] {
+  if (typeof window === "undefined") return []
+  const raw = window.localStorage.getItem(EQUIPMENT_HISTORY_STORAGE_KEY)
+  if (!raw) return []
+  try {
+    const entries = JSON.parse(raw) as EquipmentHistoryEntry[]
+    return Array.isArray(entries)
+      ? entries.filter((entry) => entry.action === "incident-resolved")
+      : []
+  } catch {
+    window.localStorage.removeItem(EQUIPMENT_HISTORY_STORAGE_KEY)
+    return []
+  }
+}
+
+export function deleteEquipmentHistoryEntry(id: string): void {
+  if (typeof window === "undefined") return
+  const nextEntries = loadEquipmentHistory().filter((entry) => entry.id !== id)
+  window.localStorage.setItem(EQUIPMENT_HISTORY_STORAGE_KEY, JSON.stringify(nextEntries))
+  window.dispatchEvent(new Event(EQUIPMENT_UPDATED_EVENT))
+}
+
+export function clearEquipmentHistory(): void {
+  if (typeof window === "undefined") return
+  window.localStorage.removeItem(EQUIPMENT_HISTORY_STORAGE_KEY)
   window.dispatchEvent(new Event(EQUIPMENT_UPDATED_EVENT))
 }
