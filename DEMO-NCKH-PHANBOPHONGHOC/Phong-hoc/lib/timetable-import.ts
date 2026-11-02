@@ -92,6 +92,7 @@ function parseCsv(text: string): string[][] {
 function columnFor(header: string): ColumnName | null {
   const value = normalize(header)
   if (/^(ten mon|ten mon hoc|mon hoc|ten hoc phan|hoc phan|course name|subject)$/.test(value)) return "name"
+  if (/^(ma nganh|nganh hoc|major|department)$/.test(value)) return "major"
   if (/^(lop|ten lop|ma lop|nhom|class|class name)$/.test(value)) return "className"
   if (/^(ma mon|ma hoc phan|course code|subject code)$/.test(value)) return "courseCode"
   if (
@@ -111,6 +112,21 @@ function columnFor(header: string): ColumnName | null {
   if (/^(khoa|khoa hoc|cohort|year)$/.test(value)) return "cohort"
   if (/^(nganh|major|department)$/.test(value)) return "major"
   return null
+}
+
+export function cohortFromIdentifier(
+  value: string,
+): "K22" | "K23" | "K24" | "K25" | "K26" | "common" {
+  const identifierMatch = value.match(/(?:^|[^0-9])((?:22|23|24|25)05)/)
+  if (identifierMatch) {
+    return `K${identifierMatch[1].slice(0, 2)}` as
+      | "K22"
+      | "K23"
+      | "K24"
+      | "K25"
+  }
+  const classMatch = value.match(/(?:^|[^0-9])((?:22|23|24|25|26))[A-Z]\d/)
+  return classMatch ? (`K${classMatch[1]}` as "K22" | "K23" | "K24" | "K25" | "K26") : "common"
 }
 
 function parseDay(value: string): number | null {
@@ -264,7 +280,6 @@ function mapRow(
   const className = get("className").trim()
   const section = get("section").trim()
   const courseCode = get("courseCode").trim()
-  const cohort = get("cohort").trim().toUpperCase()
   const major = get("major").trim()
   if (className) {
     const sectionSuffix = section ? `.${section}` : ""
@@ -274,7 +289,7 @@ function mapRow(
   }
   if (section) classInfo.section = section
   if (courseCode) classInfo.courseCode = courseCode
-  if (/^K2[3-6]$/.test(cohort)) classInfo.cohort = cohort as ImportedClass["cohort"]
+  classInfo.cohort = cohortFromIdentifier(`${major} ${className}`)
   if (major) classInfo.major = major
   if (needsReview.length > 0) classInfo.needsReview = needsReview
   return { classInfo }
@@ -315,7 +330,7 @@ function parseLooseLine(line: string, rowNumber: number): { classInfo?: Imported
     .replace(periodMatch[0], " ")
     .replace(sizeMatch?.[0] ?? "", " ")
     .replace(/\b(?:lop|class)\s*[:#-]?\s*[\w.-]+\b/i, " ")
-    .replace(/\b(?:K2[3-6]|[A-Z]{1,4}\d{2,})\b/g, " ")
+    .replace(/\b(?:K2[2-5]|[A-Z]{1,4}\d{2,})\b/g, " ")
     .replace(/[|,;]+/g, " ")
     .replace(/\s+/g, " ")
     .trim()
@@ -346,6 +361,9 @@ function parseLooseLine(line: string, rowNumber: number): { classInfo?: Imported
     ]),
     rowNumber,
   )
+  if (mapped.classInfo) {
+    mapped.classInfo.cohort = cohortFromIdentifier(line)
+  }
   return mapped
 }
 

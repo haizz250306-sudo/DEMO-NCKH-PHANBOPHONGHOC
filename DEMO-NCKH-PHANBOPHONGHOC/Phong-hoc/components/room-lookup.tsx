@@ -611,7 +611,7 @@ export function RoomLookup() {
           <CalendarDays className="size-4 text-primary" />
           Xem lịch theo khóa
         </div>
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
           {(Object.keys(COHORT_LABELS) as CohortFilter[]).map((item) => (
             <button
               key={item}
@@ -628,13 +628,6 @@ export function RoomLookup() {
             </button>
           ))}
         </div>
-        {cohort === "K26" &&
-          SHEET_CLASSES.every((item) => item.cohort !== "K26") && (
-            <p className="mt-3 text-xs text-amber-700">
-              Chưa có dữ liệu thời khóa biểu Khóa 26 trong Google Sheet hiện
-              tại.
-            </p>
-          )}
       </section>
 
       <section

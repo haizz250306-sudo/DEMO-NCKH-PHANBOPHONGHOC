@@ -2,7 +2,13 @@
 
 import { useRef, useState } from "react"
 import { FileUp, LoaderCircle, Trash2, Upload, X } from "lucide-react"
-import { classImportKey, DAY_LABELS, SHIFT_LABELS } from "@/lib/scheduling"
+import {
+  classImportKey,
+  COHORT_LABELS,
+  DAY_LABELS,
+  SHIFT_LABELS,
+  type CohortFilter,
+} from "@/lib/scheduling"
 import type { ImportedClass, ImportIssue } from "@/lib/timetable-import"
 
 type ImportSummary = {
@@ -28,6 +34,12 @@ export function TimetableUpload({
   const [progress, setProgress] = useState<{ message: string; percent: number } | null>(null)
   const [notice, setNotice] = useState("")
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [previewCohort, setPreviewCohort] = useState<CohortFilter>("all")
+
+  const previewClasses =
+    previewCohort === "all"
+      ? classes
+      : classes.filter((classInfo) => classInfo.cohort === previewCohort)
 
   async function handleFile(file?: File) {
     if (!file) return
@@ -44,6 +56,7 @@ export function TimetableUpload({
         setProgress({ message, percent }),
       )
       setClasses(result.classes)
+      setPreviewCohort("all")
       setIssues(result.issues)
       if (result.classes.length === 0) {
         setError(
@@ -227,6 +240,34 @@ export function TimetableUpload({
             </div>
           </div>
 
+          <div
+            className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6"
+            aria-label="Lọc bản xem trước theo khóa"
+          >
+            {(Object.keys(COHORT_LABELS) as CohortFilter[]).map((cohort) => {
+              const count =
+                cohort === "all"
+                  ? classes.length
+                  : classes.filter((classInfo) => classInfo.cohort === cohort)
+                      .length
+              return (
+                <button
+                  key={cohort}
+                  type="button"
+                  onClick={() => setPreviewCohort(cohort)}
+                  className={[
+                    "rounded-xl border px-3 py-2 text-xs font-bold transition-all",
+                    previewCohort === cohort
+                      ? "border-indigo-600 bg-indigo-600 text-white"
+                      : "border-indigo-200 bg-white text-slate-700 hover:bg-indigo-50",
+                  ].join(" ")}
+                >
+                  {COHORT_LABELS[cohort]} ({count})
+                </button>
+              )
+            })}
+          </div>
+
           <div className="max-h-80 overflow-auto rounded-xl border border-slate-200 bg-white">
             <table className="w-full min-w-[760px] table-fixed border-collapse text-center text-xs">
               <colgroup>
@@ -246,15 +287,28 @@ export function TimetableUpload({
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {classes.map((classInfo, index) => (
+                {previewClasses.map((classInfo) => {
+                  const index = classes.indexOf(classInfo)
+                  return (
                   <tr key={`${classInfo.name}-${index}`} className="text-slate-700">
                     <td className="px-3 py-2.5 text-center font-semibold">{classInfo.name}</td>
-                    <td className="truncate px-3 py-2.5 text-center" title={
-                      [classInfo.courseCode, classInfo.className, classInfo.cohort]
-                        .filter(Boolean)
-                        .join(" · ") || "—"
-                    }>
-                      {[classInfo.courseCode, classInfo.className, classInfo.cohort]
+                    <td
+                      className="truncate px-3 py-2.5 text-center"
+                      title={
+                        [
+                          classInfo.courseCode,
+                          classInfo.className,
+                          classInfo.cohort !== "common" ? classInfo.cohort : undefined,
+                        ]
+                          .filter(Boolean)
+                          .join(" · ") || "—"
+                      }
+                    >
+                      {[
+                        classInfo.courseCode,
+                        classInfo.className,
+                        classInfo.cohort !== "common" ? classInfo.cohort : undefined,
+                      ]
                         .filter(Boolean)
                         .join(" · ") || "—"}
                     </td>
@@ -283,10 +337,16 @@ export function TimetableUpload({
                       </button>
                     </td>
                   </tr>
-                ))}
+                  )
+                })}
               </tbody>
             </table>
           </div>
+          {previewClasses.length === 0 && (
+            <p className="rounded-xl border border-slate-200 bg-white p-4 text-center text-sm text-slate-500">
+              Không có lớp thuộc bộ lọc này trong file đang xem trước.
+            </p>
+          )}
           {classes.some((classInfo) => classInfo.needsReview?.length) && (
             <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
               {classes.filter((classInfo) => classInfo.needsReview?.length).length} lớp

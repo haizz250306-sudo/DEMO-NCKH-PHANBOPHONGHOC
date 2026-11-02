@@ -82,9 +82,7 @@ export function PortalShell({
 }) {
   const isAdmin = role === "admin";
   const isLecturer = role === "lecturer";
-  const [activePanel, setActivePanel] = useState<AdminPanel>(() =>
-    isAdmin && typeof window !== "undefined" ? panelFromPath(window.location.pathname) : "home",
-  );
+  const [activePanel, setActivePanel] = useState<AdminPanel>("home");
   const [adminNavOpen, setAdminNavOpen] = useState(false);
   const [adminAccountOpen, setAdminAccountOpen] = useState(false);
   const adminAccountRef = useRef<HTMLDivElement>(null);
@@ -95,6 +93,17 @@ export function PortalShell({
   const [now, setNow] = useState<Date | null>(null);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [notificationVersion, setNotificationVersion] = useState(0);
+  const [notificationData, setNotificationData] = useState<{
+    latestAllocation: ReturnType<typeof listAllocationHistory>[number] | null;
+    pendingBorrowRequests: number;
+    unresolvedIncidents: number;
+    latestEquipment: ReturnType<typeof loadEquipmentHistory>[number] | null;
+  }>({
+    latestAllocation: null,
+    pendingBorrowRequests: 0,
+    unresolvedIncidents: 0,
+    latestEquipment: null,
+  });
 
   function selectAdminPanel(panel: AdminPanel) {
     setActivePanel(panel);
@@ -105,6 +114,7 @@ export function PortalShell({
 
   useEffect(() => {
     if (!isAdmin) return;
+    setActivePanel(panelFromPath(window.location.pathname));
     const handlePopState = () => setActivePanel(panelFromPath(window.location.pathname));
     window.addEventListener("popstate", handlePopState);
     return () => window.removeEventListener("popstate", handlePopState);
@@ -119,8 +129,20 @@ export function PortalShell({
 
   useEffect(() => {
     if (!isAdmin) return;
-    const refreshNotifications = () =>
+    const refreshNotifications = () => {
+      setNotificationData({
+        latestAllocation: listAllocationHistory()[0] ?? null,
+        pendingBorrowRequests: loadBorrowRequests().filter(
+          (request) => request.status === "pending",
+        ).length,
+        unresolvedIncidents: loadIncidents().filter(
+          (incident) => incident.status !== "resolved",
+        ).length,
+        latestEquipment: loadEquipmentHistory()[0] ?? null,
+      });
       setNotificationVersion((version) => version + 1);
+    };
+    refreshNotifications();
     const events = [
       ALLOCATION_UPDATED_EVENT,
       BORROW_REQUESTS_UPDATED_EVENT,
@@ -293,14 +315,12 @@ export function PortalShell({
       if (hours < 24) return `${hours} giờ trước`;
       return `${Math.floor(hours / 24)} ngày trước`;
     };
-    const latestAllocation = listAllocationHistory()[0];
-    const pendingBorrowRequests = loadBorrowRequests().filter(
-      (request) => request.status === "pending",
-    ).length;
-    const unresolvedIncidents = loadIncidents().filter(
-      (incident) => incident.status !== "resolved",
-    ).length;
-    const latestEquipment = loadEquipmentHistory()[0];
+    const {
+      latestAllocation,
+      pendingBorrowRequests,
+      unresolvedIncidents,
+      latestEquipment,
+    } = notificationData;
     const notifications = [
       latestAllocation && {
         text: `Cập nhật phân bổ phòng học kỳ ${latestAllocation.semesterKey}`,

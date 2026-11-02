@@ -28,7 +28,7 @@ export type ClassInfo = {
   /** TKB ban hành: khi có, thuật toán bắt buộc giữ nguyên khung tiết này. */
   startPeriod?: number
   endPeriod?: number
-  cohort?: "K23" | "K24" | "K25" | "K26"
+  cohort?: string
   courseCode?: string
   major?: string
   className?: string
@@ -148,14 +148,23 @@ export const CAMPUS_LABELS = {
 
 export type CampusFilter = keyof typeof CAMPUS_LABELS
 
-export type CohortFilter = "all" | "K23" | "K24" | "K25" | "K26"
+export type CohortFilter =
+  | "all"
+  | "K22"
+  | "K23"
+  | "K24"
+  | "K25"
+  | "K26"
+  | "common"
 
 export const COHORT_LABELS: Record<CohortFilter, string> = {
   all: "Tất cả khóa",
+  K22: "Khóa 22",
   K23: "Khóa 23",
   K24: "Khóa 24",
   K25: "Khóa 25",
   K26: "Khóa 26",
+  common: "Lớp học phần chung",
 }
 
 /** Các tiết thuộc từng ca. Sáng 1-5, Chiều 6-10, Tối 11-13. */

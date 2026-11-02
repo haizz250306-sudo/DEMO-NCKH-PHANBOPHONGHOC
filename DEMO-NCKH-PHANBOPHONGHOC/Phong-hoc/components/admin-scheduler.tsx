@@ -47,7 +47,7 @@ import {
 } from "@/lib/scheduling";
 import { SHEET_CLASSES, SHEET_ROOMS } from "@/lib/schedule-data";
 import { TimetableUpload, type ImportMode } from "@/components/timetable-upload";
-import type { ImportedClass } from "@/lib/timetable-import";
+import { cohortFromIdentifier, type ImportedClass } from "@/lib/timetable-import";
 import {
   getCourseCredits,
   getCourseMeetingTimelines,
@@ -75,6 +75,32 @@ import {
 
 const ROOMS = SHEET_ROOMS;
 const INITIAL_SEMESTER_KEY: SemesterKey = "2026-2027-HK1";
+
+function cohortFilterOf(value: string | undefined): CohortFilter {
+  return value === "K22" ||
+    value === "K23" ||
+    value === "K24" ||
+    value === "K25" ||
+    value === "K26" ||
+    value === "common"
+    ? value
+    : "all";
+}
+
+function normalizeCohort(classInfo: ClassInfo): ClassInfo {
+  return {
+    ...classInfo,
+    cohort: cohortFromIdentifier(
+      `${classInfo.major ?? ""} ${classInfo.className ?? ""} ${
+        classInfo.courseCode ?? ""
+      }`,
+    ),
+  };
+}
+
+function normalizeClasses(classes: ClassInfo[]): ClassInfo[] {
+  return classes.map(normalizeCohort);
+}
 
 type ImportPreviewRow = {
   rowNumber: number;
@@ -119,7 +145,7 @@ const IMPORT_COLUMNS = {
   endPeriod: ["tietketthuc", "tietkt", "dentiet", "endperiod"],
   cohort: ["khoa", "khoahoc", "cohort"],
   courseCode: ["mamon", "mahocphan", "magv", "coursecode", "code"],
-  major: ["nganh", "major"],
+  major: ["nganh", "nganhhoc", "manganh", "major"],
   className: ["malop", "tenlop", "classname", "class"],
   section: ["nhom", "lopso", "solop", "section", "groupnumber"],
 } as const;
@@ -259,13 +285,11 @@ function parseImportedRows(rows: Record<string, unknown>[]): {
             periods: periods!,
             ...(startPeriod !== null ? { startPeriod } : {}),
             ...(endPeriod !== null ? { endPeriod } : {}),
-            ...(String(importValue(row, IMPORT_COLUMNS.cohort) ?? "").trim()
-              ? {
-                  cohort: String(
-                    importValue(row, IMPORT_COLUMNS.cohort),
-                  ).trim() as ClassInfo["cohort"],
-                }
-              : {}),
+            cohort: cohortFromIdentifier(
+              `${String(importValue(row, IMPORT_COLUMNS.major) ?? "")} ${String(
+                importValue(row, IMPORT_COLUMNS.className) ?? "",
+              )}`,
+            ),
             ...(String(importValue(row, IMPORT_COLUMNS.courseCode) ?? "").trim()
               ? {
                   courseCode: String(
@@ -376,7 +400,9 @@ export function AdminScheduler() {
   const [semesterKey, setSemesterKey] = useState<SemesterKey>(
     getCurrentSemesterKey(),
   );
-  const [classes, setClasses] = useState<ClassInfo[]>(SHEET_CLASSES);
+  const [classes, setClasses] = useState<ClassInfo[]>(() =>
+    normalizeClasses(SHEET_CLASSES),
+  );
   const [result, setResult] = useState<ScheduleResult | null>(null);
   const [allocationHistory, setAllocationHistory] = useState<
     AllocationHistoryEntry[]
@@ -469,11 +495,12 @@ export function AdminScheduler() {
   useEffect(() => {
     setIsSemesterReady(false);
     const importedClasses = loadImportedClasses(semesterKey);
-    const semesterClasses =
+    const semesterClasses = normalizeClasses(
       importedClasses ??
-      (semesterKey === INITIAL_SEMESTER_KEY ? SHEET_CLASSES : []);
+        (semesterKey === INITIAL_SEMESTER_KEY ? SHEET_CLASSES : []),
+    );
     if (!importedClasses && semesterKey === INITIAL_SEMESTER_KEY) {
-      saveSemesterClasses(INITIAL_SEMESTER_KEY, SHEET_CLASSES);
+      saveSemesterClasses(INITIAL_SEMESTER_KEY, semesterClasses);
     }
     setClasses(semesterClasses);
     const snapshot = loadAllocationSnapshot(semesterKey);
@@ -484,11 +511,11 @@ export function AdminScheduler() {
       setIsSemesterReady(true);
       return;
     }
-    setClasses(snapshot.classes);
+    setClasses(normalizeClasses(snapshot.classes));
     setResult(
       snapshot.algorithmVersion === ALLOCATION_ALGORITHM_VERSION
         ? snapshot.result
-        : autoSchedule(snapshot.classes, ROOMS),
+        : autoSchedule(normalizeClasses(snapshot.classes), ROOMS),
     );
     setNewClassIds(
       snapshot.classes
@@ -618,7 +645,7 @@ export function AdminScheduler() {
       setSelectedDay(assignment.day);
       setSelectedCampus(room?.campus ?? "all");
       setSelectedBuilding(room?.building ?? "all");
-      setSelectedCohort(classInfo.cohort ?? "all");
+      setSelectedCohort(cohortFilterOf(classInfo.cohort));
       setHighlightedClassId(classInfo.id);
     }
 
@@ -628,24 +655,28 @@ export function AdminScheduler() {
   function handleSemesterChange(nextSemester: SemesterKey) {
     setSemesterKey(nextSemester);
     const storedClasses = loadImportedClasses(nextSemester);
-    const nextClasses =
+    const nextClasses = normalizeClasses(
       storedClasses ??
-      (nextSemester === INITIAL_SEMESTER_KEY ? SHEET_CLASSES : []);
+        (nextSemester === INITIAL_SEMESTER_KEY ? SHEET_CLASSES : []),
+    );
     if (nextSemester === INITIAL_SEMESTER_KEY && !storedClasses) {
-      saveSemesterClasses(INITIAL_SEMESTER_KEY, SHEET_CLASSES);
+      saveSemesterClasses(INITIAL_SEMESTER_KEY, nextClasses);
     }
     const snapshot = loadAllocationSnapshot(nextSemester);
-    setClasses(snapshot?.classes ?? nextClasses);
+    const snapshotClasses = snapshot
+      ? normalizeClasses(snapshot.classes)
+      : nextClasses;
+    setClasses(snapshotClasses);
     setResult(
       snapshot
         ? snapshot.algorithmVersion === ALLOCATION_ALGORITHM_VERSION
           ? snapshot.result
-          : autoSchedule(snapshot.classes, ROOMS)
+          : autoSchedule(snapshotClasses, ROOMS)
         : null,
     );
     setNewClassIds(
       snapshot
-        ? snapshot.classes
+        ? snapshotClasses
             .filter((item) => !SHEET_CLASSES.some((base) => base.id === item.id))
             .map((item) => item.id)
         : [],
@@ -790,6 +821,10 @@ export function AdminScheduler() {
       setResult(nextResult);
       setAllocationHistory(listAllocationHistory(semesterKey));
       setNewClassIds(nextClasses.map((classInfo) => classInfo.id));
+      setSelectedCohort("all");
+      setSelectedDay(2);
+      setSelectedCampus("all");
+      setSelectedBuilding("all");
       setSuccessMessage(
         nextResult.unassigned.length === 0
           ? `Đã xếp phòng thành công! Đã tải ${nextClasses.length} lớp.`
@@ -936,6 +971,10 @@ export function AdminScheduler() {
     ]);
     setResult(nextResult);
     setAllocationHistory(listAllocationHistory(semesterKey));
+    setSelectedCohort("all");
+    setSelectedDay(2);
+    setSelectedCampus("all");
+    setSelectedBuilding("all");
     setSuccessMessage(
       nextResult.unassigned.length === 0
         ? `Đã xếp phòng thành công! Đã thêm ${accepted.length} lớp.`
@@ -1005,7 +1044,7 @@ export function AdminScheduler() {
     setSelectedDay(alt.day);
     setSelectedCampus(room?.campus ?? "all");
     setSelectedBuilding(room?.building ?? "all");
-    setSelectedCohort(cls.cohort ?? "all");
+    setSelectedCohort(cohortFilterOf(cls.cohort));
     setEditingClassId(null);
     setHighlightedClassId(cls.id);
     window.setTimeout(() => {
@@ -1077,7 +1116,7 @@ export function AdminScheduler() {
     setSelectedDay(assignment.day);
     setSelectedCampus(room.campus ?? "all");
     setSelectedBuilding(room.building ?? "all");
-    setSelectedCohort(cls.cohort ?? "all");
+    setSelectedCohort(cohortFilterOf(cls.cohort));
     setHighlightedClassId(assignment.classId);
     window.setTimeout(() => {
       document
@@ -1201,6 +1240,34 @@ export function AdminScheduler() {
     classById,
   ]);
 
+  const selectedCohortClasses = useMemo(
+    () =>
+      selectedCohort === "all"
+        ? classes
+        : classes.filter((classInfo) => classInfo.cohort === selectedCohort),
+    [classes, selectedCohort],
+  );
+  const selectedCohortClassIds = useMemo(
+    () => new Set(selectedCohortClasses.map((classInfo) => classInfo.id)),
+    [selectedCohortClasses],
+  );
+  const selectedCohortAssignments = useMemo(
+    () =>
+      displayAssignments.filter((assignment) =>
+        selectedCohortClassIds.has(assignment.classId),
+      ),
+    [displayAssignments, selectedCohortClassIds],
+  );
+  const selectedCohortUnassignedCount = useMemo(
+    () =>
+      result
+        ? result.unassigned.filter((item) =>
+            selectedCohortClassIds.has(item.classInfo.id),
+          ).length
+        : 0,
+    [result, selectedCohortClassIds],
+  );
+
   return (
     <div className="relative space-y-6">
       {!isSemesterReady && (
@@ -1306,42 +1373,43 @@ export function AdminScheduler() {
       />
       <AddClassForm onAdd={handleAddClass} />
 
-      <section
-        aria-label="Chọn khóa xem lịch phòng"
-        className="rounded-2xl border border-white/60 bg-white/60 p-4 shadow-[0_8px_30px_rgb(15,23,42,0.05)] backdrop-blur-xl"
-      >
-        <div className="mb-3 flex items-center gap-2 text-sm font-bold text-foreground">
-          <CalendarDays className="size-4 text-primary" />
-          Lịch phòng theo khóa
-        </div>
-        <p className="mb-3 text-xs text-muted-foreground">
-          Chọn một khóa để chỉ xem các phòng đã được phân bổ cho khóa đó.
-        </p>
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
-          {(Object.keys(COHORT_LABELS) as CohortFilter[]).map((cohort) => (
-            <button
-              key={cohort}
-              type="button"
-              onClick={() => setSelectedCohort(cohort)}
-              className={[
-                "rounded-xl border px-3 py-2.5 text-sm font-semibold transition-all",
-                selectedCohort === cohort
-                  ? "border-primary bg-primary text-primary-foreground shadow-sm"
-                  : "border-border bg-card text-foreground hover:border-primary/40 hover:bg-accent",
-              ].join(" ")}
-            >
-              {COHORT_LABELS[cohort]}
-            </button>
-          ))}
-        </div>
-        {selectedCohort === "K26" &&
-          classes.every((item) => item.cohort !== "K26") && (
-            <p className="mt-3 text-xs text-amber-700">
-              Chưa có dữ liệu thời khóa biểu Khóa 26 trong Google Sheet hiện
-              tại.
-            </p>
-          )}
-      </section>
+      {result && classes.length > 0 && (
+        <section
+          aria-label="Chọn khóa xem lịch phòng"
+          className="rounded-2xl border border-white/60 bg-white/60 p-4 shadow-[0_8px_30px_rgb(15,23,42,0.05)] backdrop-blur-xl"
+        >
+          <div className="mb-3 flex items-center gap-2 text-sm font-bold text-foreground">
+            <CalendarDays className="size-4 text-primary" />
+            Lịch phòng theo khóa
+          </div>
+          <p className="mb-3 text-xs text-muted-foreground">
+            Chọn một khóa để chỉ xem các phòng đã được phân bổ cho khóa đó.
+          </p>
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
+            {([
+              "all",
+              ...(["K22", "K23", "K24", "K25", "K26", "common"] as CohortFilter[]).filter(
+                (cohort) =>
+                  classes.some((classInfo) => classInfo.cohort === cohort),
+              ),
+            ] as CohortFilter[]).map((cohort) => (
+              <button
+                key={cohort}
+                type="button"
+                onClick={() => setSelectedCohort(cohort)}
+                className={[
+                  "rounded-xl border px-3 py-2.5 text-sm font-semibold transition-all",
+                  selectedCohort === cohort
+                    ? "border-primary bg-primary text-primary-foreground shadow-sm"
+                    : "border-border bg-card text-foreground hover:border-primary/40 hover:bg-accent",
+                ].join(" ")}
+              >
+                {COHORT_LABELS[cohort]}
+              </button>
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* Điều khiển & tổng quan */}
       <div className="flex flex-col gap-4 rounded-2xl border border-white/60 bg-white/60 p-5 shadow-[0_8px_30px_rgb(15,23,42,0.05)] backdrop-blur-xl md:flex-row md:items-center md:justify-between">
@@ -1389,19 +1457,19 @@ export function AdminScheduler() {
           <ResultStat
             icon={<Layers className="size-5" />}
             label="Tổng lớp"
-            value={classes.length}
+            value={selectedCohortClasses.length}
             tone="navy"
           />
           <ResultStat
             icon={<CheckCircle2 className="size-5" />}
             label="Đã xếp phòng"
-            value={displayAssignments.length}
+            value={selectedCohortAssignments.length}
             tone="green"
           />
           <ResultStat
             icon={<AlertTriangle className="size-5" />}
             label="Bị đẩy ra ngoài"
-            value={result.unassigned.length}
+            value={selectedCohortUnassignedCount}
             tone="red"
             onClick={() =>
               document
@@ -1412,7 +1480,7 @@ export function AdminScheduler() {
           <ResultStat
             icon={<Users className="size-5" />}
             label="Sĩ số đã bố trí"
-            value={displayAssignments.reduce(
+            value={selectedCohortAssignments.reduce(
               (s, a) => s + (classById.get(a.classId)?.size ?? 0),
               0,
             )}
@@ -1531,10 +1599,10 @@ export function AdminScheduler() {
         <section className="rounded-2xl border border-amber-200 bg-amber-50/70 p-4 text-sm text-amber-900">
           <div className="flex items-center gap-2 font-bold">
             <AlertTriangle className="size-4" />
-            Vùng dự trù K26
+            Vùng dự trù
           </div>
           <p className="mt-1 text-xs leading-5">
-            Hệ thống khóa các phòng chưa dùng của K23–K25 theo từng Thứ + ca;
+            Hệ thống khóa các phòng chưa dùng theo từng Thứ + ca;
             mục tiêu ca sáng và chiều là tối thiểu 18 phòng.
           </p>
           {result.reserveWarnings.length > 0 ? (
@@ -1663,13 +1731,13 @@ export function AdminScheduler() {
                     </p>
                   ) : (
                     <ul className="grid gap-2 md:grid-cols-2">
-                      {searchResults.map((assignment) => {
+                      {searchResults.map((assignment, assignmentIndex) => {
                         const cls = classById.get(assignment.classId);
                         const room = roomById.get(assignment.roomId);
                         if (!cls || !room) return null;
                         return (
                           <li
-                            key={`search-${assignment.classId}`}
+                            key={`search-${assignment.classId}-${assignment.roomId}-${assignment.day}-${assignment.startPeriod}-${assignmentIndex}`}
                             className="rounded-xl border border-primary/15 bg-primary/5 px-3 py-2.5"
                           >
                             <div className="flex items-start justify-between gap-3">
@@ -1820,7 +1888,7 @@ export function AdminScheduler() {
                                 </div>
                               </div>
                               <ul className="flex flex-col gap-2.5">
-                                {campusItems.map((a) => {
+                                {campusItems.map((a, assignmentIndex) => {
                                   const cls = classById.get(a.classId);
                                   const room = roomById.get(a.roomId);
                                   const courseCode = cls ? getCourseCode(cls) : undefined;
@@ -1835,7 +1903,7 @@ export function AdminScheduler() {
                                   if (!cls || !room) return null;
                                   return (
                                     <li
-                                      key={a.classId}
+                                      key={`${a.classId}-${a.roomId}-${a.day}-${a.startPeriod}-${assignmentIndex}`}
                                       id={`assignment-${a.classId}`}
                                       data-assignment-card
                                       onClick={() =>
@@ -1938,9 +2006,9 @@ export function AdminScheduler() {
                         </p>
                       ) : (
                         <ul className="mt-2 grid gap-1.5 sm:grid-cols-2">
-                          {roomsWithFreePeriods.map(({ room, freePeriods }) => (
+                          {roomsWithFreePeriods.map(({ room, freePeriods }, roomIndex) => (
                             <li
-                              key={room.id}
+                              key={`${room.id}-${roomIndex}`}
                               className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-white/80 px-2.5 py-2 text-xs"
                             >
                               <span className="font-semibold text-slate-800">
@@ -2241,7 +2309,7 @@ function NewClassesPanel({
         </div>
       </div>
       <ul className="mt-4 grid gap-2 md:grid-cols-2">
-        {classes.map((classInfo) => {
+        {classes.map((classInfo, classIndex) => {
           const assignment = result.assignments.find(
             (item) => item.classId === classInfo.id,
           );
@@ -2255,7 +2323,7 @@ function NewClassesPanel({
           const displayEnd = assignment?.endPeriod ?? classInfo.endPeriod;
           return (
             <li
-              key={classInfo.id}
+              key={`${classInfo.id}-${classIndex}`}
               className="flex items-center justify-between gap-3 rounded-xl border border-sky-200 bg-white/70 px-3 py-2.5"
             >
               <div className="min-w-0">
@@ -2582,9 +2650,9 @@ function UnassignedPanel({
         </p>
       )}
       <ul className="flex flex-col gap-3">
-        {result.unassigned.map((u) => (
+        {result.unassigned.map((u, unassignedIndex) => (
           <UnassignedItem
-            key={u.classInfo.id}
+            key={`${u.classInfo.id}-${unassignedIndex}`}
             classInfo={u.classInfo}
             reason={u.reason}
             assignments={result.assignments}
@@ -2643,23 +2711,43 @@ function UnassignedItem({
 
   function handleSaveDetails(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const missing = new Set(classInfo.needsReview ?? []);
+    if (classInfo.size < 1) missing.add("sĩ số");
+    const canEdit = (field: string) => missing.has(field);
     const parsedSize = Number(size);
     const parsedDay = Number(day);
     const parsedStart = Number(startPeriod);
     const parsedEnd = Number(endPeriod);
+    const nextSize = canEdit("sĩ số") ? parsedSize : classInfo.size;
+    const nextDay = canEdit("thứ") ? parsedDay : classInfo.day;
+    const nextShift = canEdit("ca học") ? shift : classInfo.shift;
+    const nextStart = canEdit("tiết học")
+      ? parsedStart
+      : classInfo.startPeriod ?? SHIFT_PERIODS[classInfo.shift][0];
+    const nextEnd = canEdit("tiết học")
+      ? parsedEnd
+      : classInfo.endPeriod ?? nextStart + classInfo.periods - 1;
+    const [nextShiftStart, nextShiftEnd] = [
+      SHIFT_PERIODS[nextShift][0],
+      SHIFT_PERIODS[nextShift][SHIFT_PERIODS[nextShift].length - 1],
+    ];
     const needsReview = [
-      ...(Number.isInteger(parsedSize) && parsedSize > 0 ? [] : ["sĩ số"]),
-      ...(DAYS.includes(parsedDay as (typeof DAYS)[number]) ? [] : ["thứ"]),
-      ...(parsedEnd >= parsedStart && parsedStart > 0 ? [] : ["tiết học"]),
+      ...(Number.isInteger(nextSize) && nextSize > 0 ? [] : ["sĩ số"]),
+      ...(DAYS.includes(nextDay as (typeof DAYS)[number]) ? [] : ["thứ"]),
+      ...(nextEnd >= nextStart &&
+      nextStart >= nextShiftStart &&
+      nextEnd <= nextShiftEnd
+        ? []
+        : ["tiết học"]),
     ];
     onUpdateClass({
       ...classInfo,
-      size: Number.isInteger(parsedSize) && parsedSize > 0 ? parsedSize : 0,
-      day: parsedDay,
-      shift,
-      periods: parsedEnd - parsedStart + 1,
-      startPeriod: parsedStart,
-      endPeriod: parsedEnd,
+      size: Number.isInteger(nextSize) && nextSize > 0 ? nextSize : 0,
+      day: nextDay,
+      shift: nextShift,
+      periods: nextEnd - nextStart + 1,
+      startPeriod: nextStart,
+      endPeriod: nextEnd,
       needsReview,
     });
     setEditing(false);
@@ -2670,6 +2758,14 @@ function UnassignedItem({
     missingFields.length > 0
       ? `Bổ sung ${missingFields.join(", ")}`
       : "Cần bổ sung sĩ số";
+  const fieldLabelClass = (field: string) =>
+    missingFields.includes(field)
+      ? "text-amber-900"
+      : "text-slate-400 opacity-60";
+  const fieldInputClass = (field: string) =>
+    missingFields.includes(field)
+      ? "border-amber-400 bg-white text-slate-900 ring-2 ring-amber-200"
+      : "border-slate-200 bg-slate-100 text-slate-400 opacity-60";
 
   return (
     <li ref={editorRef} className="rounded-xl border border-red-200 bg-white/80 p-4">
@@ -2716,23 +2812,25 @@ function UnassignedItem({
           onSubmit={handleSaveDetails}
           className="mt-4 grid gap-3 rounded-xl border border-amber-200 bg-amber-50/70 p-3 sm:grid-cols-2 lg:grid-cols-5"
         >
-          <label className="text-xs font-semibold text-slate-700">
-            Sĩ số
+          <label className={`text-xs font-semibold ${fieldLabelClass("sĩ số")}`}>
+            Sĩ số{missingFields.includes("sĩ số") ? " · Cần bổ sung" : ""}
             <input
               type="number"
               min="1"
               value={size}
+              disabled={!missingFields.includes("sĩ số") && classInfo.size > 0}
               onChange={(event) => setSize(event.target.value)}
-              className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-2.5 py-2 text-sm"
+              className={`mt-1 w-full rounded-lg border px-2.5 py-2 text-sm ${fieldInputClass("sĩ số")}`}
               required
             />
           </label>
-          <label className="text-xs font-semibold text-slate-700">
-            Thứ
+          <label className={`text-xs font-semibold ${fieldLabelClass("thứ")}`}>
+            Thứ{missingFields.includes("thứ") ? " · Cần bổ sung" : ""}
             <select
               value={day}
+              disabled={!missingFields.includes("thứ")}
               onChange={(event) => setDay(event.target.value)}
-              className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-2.5 py-2 text-sm"
+              className={`mt-1 w-full rounded-lg border px-2.5 py-2 text-sm ${fieldInputClass("thứ")}`}
             >
               {DAYS.map((item) => (
                 <option key={item} value={item}>
@@ -2741,12 +2839,13 @@ function UnassignedItem({
               ))}
             </select>
           </label>
-          <label className="text-xs font-semibold text-slate-700">
-            Ca học
+          <label className={`text-xs font-semibold ${fieldLabelClass("ca học")}`}>
+            Ca học{missingFields.includes("ca học") ? " · Cần bổ sung" : ""}
             <select
               value={shift}
+              disabled={!missingFields.includes("ca học")}
               onChange={(event) => setShift(event.target.value as Shift)}
-              className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-2.5 py-2 text-sm"
+              className={`mt-1 w-full rounded-lg border px-2.5 py-2 text-sm ${fieldInputClass("ca học")}`}
             >
               {SHIFTS.map((item) => (
                 <option key={item} value={item}>
@@ -2755,27 +2854,29 @@ function UnassignedItem({
               ))}
             </select>
           </label>
-          <label className="text-xs font-semibold text-slate-700">
-            Từ tiết
+          <label className={`text-xs font-semibold ${fieldLabelClass("tiết học")}`}>
+            Từ tiết{missingFields.includes("tiết học") ? " · Cần bổ sung" : ""}
             <input
               type="number"
               min="1"
               max="13"
               value={startPeriod}
+              disabled={!missingFields.includes("tiết học")}
               onChange={(event) => setStartPeriod(event.target.value)}
-              className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-2.5 py-2 text-sm"
+              className={`mt-1 w-full rounded-lg border px-2.5 py-2 text-sm ${fieldInputClass("tiết học")}`}
               required
             />
           </label>
-          <label className="text-xs font-semibold text-slate-700">
-            Đến tiết
+          <label className={`text-xs font-semibold ${fieldLabelClass("tiết học")}`}>
+            Đến tiết{missingFields.includes("tiết học") ? " · Cần bổ sung" : ""}
             <input
               type="number"
               min="1"
               max="13"
               value={endPeriod}
+              disabled={!missingFields.includes("tiết học")}
               onChange={(event) => setEndPeriod(event.target.value)}
-              className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-2.5 py-2 text-sm"
+              className={`mt-1 w-full rounded-lg border px-2.5 py-2 text-sm ${fieldInputClass("tiết học")}`}
               required
             />
           </label>
@@ -2888,7 +2989,7 @@ function ClassListPanel({
               {DAY_LABELS[g.day]}
             </p>
             <ul className="flex flex-col gap-2">
-              {g.items.map((c) => {
+              {g.items.map((c, classIndex) => {
                 const courseCode = getCourseCode(c);
                 const displayClassName = c.className;
                 const credits = getCourseCredits(c);
@@ -2898,7 +2999,7 @@ function ClassListPanel({
 
                 return (
                   <li
-                    key={c.id}
+                    key={`${c.id}-${classIndex}`}
                     className="flex items-center justify-between gap-2 rounded-lg bg-background/60 px-2.5 py-2"
                   >
                     <div className="min-w-0">

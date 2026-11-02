@@ -8,7 +8,8 @@ export type CourseMeetingTimeline = {
   courseEndAt: string
 }
 
-const SEMESTER_STARTS: Record<NonNullable<ClassInfo["cohort"]>, [number, number, number]> = {
+const SEMESTER_STARTS: Record<string, [number, number, number]> = {
+  K22: [2026, 7, 3],
   K23: [2026, 7, 10],
   K24: [2026, 7, 10],
   K25: [2026, 7, 17],
@@ -66,12 +67,13 @@ export function getCourseMeetingTimelines(
     const firstClass = offering[0]
     const cohort = firstClass.cohort
     const credits = getCourseCredits(firstClass)
-    if (!cohort || !credits || credits <= 0) {
+    const semesterStartParts = cohort ? SEMESTER_STARTS[cohort] : undefined
+    if (!semesterStartParts || !credits || credits <= 0) {
       for (const classInfo of offering) timelines.set(classInfo.id, null)
       continue
     }
 
-    const semesterStart = new Date(...SEMESTER_STARTS[cohort])
+    const semesterStart = new Date(...semesterStartParts)
     const sessions = [...offering].sort(
       (left, right) =>
         left.day - right.day || startPeriodFor(left) - startPeriodFor(right),
